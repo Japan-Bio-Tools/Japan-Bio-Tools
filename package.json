@@ -9,6 +9,6 @@
     "dev:portal": "npm --workspace apps/portal run dev",
     "dev:tool-a": "npm --workspace apps/tool-a run dev",
     "dev:tool-b": "npm --workspace apps/tool-b run dev",
-    "build:pages": "powershell -ExecutionPolicy Bypass -File scripts/build-pages.ps1"
+    "build:pages": "node scripts/build-pages.mjs"
   }
 }
