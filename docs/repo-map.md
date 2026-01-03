@@ -1,29 +1,43 @@
+# Repository Map
 
-# Repo Map (Monorepo)
+## Overview
 
-## Top-level
+本リポジトリは npm workspaces を用いた **モノレポ構成**を採用する。
 
-- `apps/*` — user-facing web apps (Vite + React + TypeScript)
-- `packages/*` — shared libraries (planned / incremental)
-- `scripts/*` — build utilities (e.g. Pages dist merge)
-- `docs/*` — project documentation (this folder)
+---
 
-## Apps
+## Root
 
-- `apps/portal`  
-  Landing page / navigation to sub tools.
+```
 
-- `apps/sse-diag`  
-  Secondary structure diagnostics tool (work in progress).
+/
+├─ apps/                  # サブアプリ群
+├─ packages/              # 将来の共通パッケージ置き場
+├─ docs/                  # プロジェクト共通ドキュメント
+├─ scripts/               # ビルド・公開用スクリプト
+├─ package.json
 
-- `apps/tool-b`  
-  Placeholder for another tool (work in progress).
+```
 
-## Packages (planned)
+---
 
-This repo keeps room for shared modules, e.g.
+## apps/
 
-- `packages/molstar-adapter` — Mol* integration boundary / state injection patterns
-- `packages/wasm-core` — Rust/WASM compute core (UI-independent)
+### apps/portal
+- ツール一覧・入口
+- GitHub Pages 上のルート
 
-Note: packages are intentionally not over-abstracted early; we extract when needed.
+### apps/sse-diag
+- SSE 診断・可視化ツール
+- Mol* 統合の初期実装対象
+
+### apps/tool-b
+- 将来拡張用のサンプル／実験ツール
+
+---
+
+## packages/（将来）
+
+- `molstar-adapter`（planned）
+  - Mol* 統合ロジックの共通化候補
+  - 初期段階では存在しない
