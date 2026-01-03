@@ -1,5 +1,3 @@
----
-
 ### `docs/dev-setup.md`
 ```md
 # Dev Setup
@@ -62,5 +60,3 @@ Each app uses a fixed `base` so that assets resolve under GitHub Pages.
 * tool-b: `/Japan-Bio-Tools/tool-b/`
 
 If you rename the repository, update these `base` values accordingly.
-
-````

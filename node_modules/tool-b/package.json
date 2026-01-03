@@ -5,23 +5,10 @@
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev:portal": "npm --workspace apps/portal run dev",
-    "dev:sse-diag": "npm --workspace apps/sse-diag run dev",
-    "dev:tool-b": "npm --workspace apps/tool-b run dev",
-
-    "build:portal": "npm --workspace apps/portal run build",
-    "build:sse-diag": "npm --workspace apps/sse-diag run build",
-    "build:tool-b": "npm --workspace apps/tool-b run build",
-    "build:pages": "node scripts/build-pages.mjs",
-
-    "lint:portal": "npm --workspace apps/portal run lint",
-    "lint:sse-diag": "npm --workspace apps/sse-diag run lint",
-    "lint:tool-b": "npm --workspace apps/tool-b run lint",
-    "lint:all": "npm run lint:portal && npm run lint:sse-diag && npm run lint:tool-b",
-
-    "preview:portal": "npm --workspace apps/portal run preview",
-    "preview:sse-diag": "npm --workspace apps/sse-diag run preview",
-    "preview:tool-b": "npm --workspace apps/tool-b run preview"
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.0",

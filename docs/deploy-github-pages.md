@@ -1,8 +1,3 @@
-
----
-
-### `docs/deploy-github-pages.md`
-```md
 # Deploy: GitHub Pages
 
 ## Overview
@@ -39,6 +34,3 @@ We want multiple sub-apps under:
 - `/Japan-Bio-Tools/tool-b/`
 
 So we build each app separately and then combine outputs into one `dist/`.
-````
-
----
