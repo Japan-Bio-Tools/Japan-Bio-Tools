@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev:portal": "npm --workspace apps/portal run dev",
-    "dev:tool-a": "npm --workspace apps/tool-a run dev",
+    "dev:sse-diag": "npm --workspace apps/sse-diag run dev",
     "dev:tool-b": "npm --workspace apps/tool-b run dev",
     "build:pages": "node scripts/build-pages.mjs"
   }

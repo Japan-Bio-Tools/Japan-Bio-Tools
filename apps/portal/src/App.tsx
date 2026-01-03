@@ -6,7 +6,7 @@ export default function App() {
 
       <h2>Tools</h2>
       <ul>
-        <li><a href="./tool-a/">Tool A</a></li>
+        <li><a href="./sse-diag/">SSEd-diag</a></li>
         <li><a href="./tool-b/">Tool B</a></li>
       </ul>
     </div>

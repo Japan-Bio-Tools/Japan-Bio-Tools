@@ -3,5 +3,5 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/Japan-Bio-Tools/tool-a/"
+  base: "/Japan-Bio-Tools/sse-diag/"
 });

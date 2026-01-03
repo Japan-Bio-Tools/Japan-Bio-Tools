@@ -13,12 +13,12 @@ mkdirSync("dist", { recursive: true });
 
 // build
 sh("npm --workspace apps/portal run build");
-sh("npm --workspace apps/tool-a run build");
+sh("npm --workspace apps/sse-diag run build");
 sh("npm --workspace apps/tool-b run build");
 
 // copy
 copyDir("apps/portal/dist", "dist");
-copyDir("apps/tool-a/dist", "dist/tool-a");
+copyDir("apps/sse-diag/dist", "dist/sse-diag");
 copyDir("apps/tool-b/dist", "dist/tool-b");
 
 // disable jekyll
