@@ -21,6 +21,7 @@ export class PrototypeRuleEngine {
       chainId: r.chainId,
       labelSeqId: r.labelSeqId,
       sse: this.assign(r.labelSeqId),
+      energy: 0,
     }));
 
     return { residues: out };

@@ -1,5 +1,5 @@
 // apps/sse-diag/src/components/MolstarSseDiagViewer.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 
 import { createMolstarPlugin, disposeMolstarPlugin } from '../molstar/plugin';

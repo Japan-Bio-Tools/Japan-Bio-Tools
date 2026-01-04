@@ -17,3 +17,5 @@ export type SseEngineInput = {
 export type SseEngineOutput = {
   residues: ResidueSseRecord[];
 };
+
+export type SseResidueKey = ResidueKey;

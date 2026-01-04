@@ -74,7 +74,7 @@ function resolveChainId(model: any, ri: number): string | undefined {
 }
 
 async function safeAttachSecondaryStructureProvider(plugin: PluginContext, structure: Structure, log?: LogFn) {
-  const ctx: any = { runtime: plugin.runtime, assetManager: (plugin as any).managers?.asset };
+  const ctx: any = { runtime: (plugin as any).runtime, assetManager: (plugin as any).managers?.asset };
   try {
     await (SecondaryStructureProvider as any).attach(ctx, structure, void 0, true);
     log?.('[SSE-Diag] SecondaryStructureProvider.attach(ctx, structure, void0, true) OK');
