@@ -1,35 +1,41 @@
 // apps/sse-diag/src/molstar/state.ts
-import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
+import type { PluginContext } from 'molstar/lib/mol-plugin/context';
 
-export async function rebuildCartoonOnly(plugin: PluginUIContext) {
-  const hierarchy = plugin.managers.structure.hierarchy;
-  const current = hierarchy.current;
+export async function rebuildCartoonOnly(plugin: PluginContext) {
+  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
+  const structures = hierarchy?.structures ?? [];
+  if (!structures.length) return;
 
-  await plugin.dataTransaction(async () => {
-    // 1) 既存の component/representation を全削除
-    // （MVP：確実性優先。最適化は後で）
-    const toRemove: string[] = [];
-    for (const s of current.structures) {
-      for (const c of s.components) toRemove.push(c.cell.transform.ref);
+  // できるだけ「一旦消して → cartoon preset」を狙う
+  for (const s of structures) {
+    const cell = s.cell;
+    try {
+      // 既存 repr を削除
+      const reprs = s.components?.flatMap((c: any) => c.representations ?? []) ?? [];
+      for (const r of reprs) {
+        try {
+          await (plugin as any).builders.structure.representation.removeRepresentation(r.cell);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
     }
-    if (toRemove.length) {
-      await hierarchy.remove(toRemove);
+
+    // preset 適用（Mol* のビルダー差があるので段階的に試す）
+    try {
+      await (plugin as any).builders.structure.representation.applyPreset(cell, 'polymer-cartoon');
+      continue;
+    } catch {
+      // ignore
     }
-
-    // 2) 各 structure から polymer component を作って cartoon を追加
-    for (const s of current.structures) {
-      const structureRef = s.cell.transform.ref;
-
-      // polymer component を作る（Mol* が内部 selection で作る）
-      const comp = await plugin.builders.structure.tryCreateComponentStatic(structureRef, 'polymer');
-      if (!comp) continue;
-
-      // cartoon rep を追加
-      await plugin.builders.structure.representation.addRepresentation(comp, {
-        type: 'cartoon',
-        // 色は secondary-structure にしておくと、上書きが “目視で確実に分かる”
-        color: 'secondary-structure',
-      });
+    try {
+      await (plugin as any).builders.structure.representation.applyPreset(cell, 'default');
+      continue;
+    } catch {
+      // ignore
     }
-  });
+    // どうしてもダメなら何もしない（SSE override だけでも内部的には反映される）
+  }
 }

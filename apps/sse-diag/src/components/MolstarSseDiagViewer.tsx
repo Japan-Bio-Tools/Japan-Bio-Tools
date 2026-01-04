@@ -28,16 +28,23 @@ export default function MolstarSseDiagViewer() {
   const pushLog: LogFn = (msg, data) => {
     const line =
       data === undefined
-        ? msg
-        : `${msg} ${typeof data === 'string' ? data : JSON.stringify(data)}`;
+        ? String(msg)
+        : `${msg} ${typeof data === 'string' ? data : safeJson(data)}`;
+
+    // consoleにも出す（Vite側で見たい時用）
+    // eslint-disable-next-line no-console
     console.log(line);
+
     setLogs((prev) => {
       const next = [...prev, line];
       return next.length > 400 ? next.slice(next.length - 400) : next;
     });
   };
 
-  const engine = useMemo(() => new PrototypeRuleEngine([rangeLo, rangeHi]), [rangeLo, rangeHi]);
+  const engine = useMemo(
+    () => new PrototypeRuleEngine([rangeLo, rangeHi]),
+    [rangeLo, rangeHi]
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -65,9 +72,11 @@ export default function MolstarSseDiagViewer() {
           disposeMolstarPlugin(plugin);
           return;
         }
+
         pluginRef.current = plugin;
         pushLog('[SSE-Diag] createMolstarPlugin() done');
       } catch (e) {
+        // eslint-disable-next-line no-console
         console.error(e);
         const msg = e instanceof Error ? (e.stack ?? e.message) : String(e);
         setFatal(msg);
@@ -106,7 +115,7 @@ export default function MolstarSseDiagViewer() {
 
       // 3) residue keys 抽出 → engine出力
       pushLog('[SSE-Diag] extractResidueKeys()');
-      const residueKeys = extractResidueKeys(plugin);
+      const residueKeys = extractResidueKeys(plugin, pushLog);
       pushLog('[SSE-Diag] residueKeys:', residueKeys.length);
 
       pushLog('[SSE-Diag] engine.compute()');
@@ -130,6 +139,7 @@ export default function MolstarSseDiagViewer() {
 
       pushLog('[SSE-Diag] runPipeline() done');
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e);
       const msg = e instanceof Error ? (e.stack ?? e.message) : String(e);
       setFatal(msg);
@@ -193,7 +203,11 @@ export default function MolstarSseDiagViewer() {
           style={{ width: '100%', marginBottom: 8 }}
         />
 
-        <button style={{ width: '100%' }} disabled={!mmcifText} onClick={() => void runPipeline(mmcifText)}>
+        <button
+          style={{ width: '100%' }}
+          disabled={!mmcifText}
+          onClick={() => void runPipeline(mmcifText)}
+        >
           再解析（override → rebuild）
         </button>
 
@@ -242,4 +256,12 @@ export default function MolstarSseDiagViewer() {
       />
     </div>
   );
+}
+
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }

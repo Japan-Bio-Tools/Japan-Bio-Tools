@@ -6,29 +6,72 @@ import type { ResidueIndex } from 'molstar/lib/mol-model/structure/model/indexin
 
 import { SecondaryStructure } from 'molstar/lib/mol-model/structure/model/properties/secondary-structure';
 import { SecondaryStructureProvider } from 'molstar/lib/mol-model-props/computed/secondary-structure';
-import { SecondaryStructureType } from 'molstar/lib/mol-model/structure/model/types';
 
 import type { SseEngineOutput, SseLabel } from '../domain/sse/types';
 import { residueKeyToString } from '../domain/sse/compare';
 
 type LogFn = (msg: string, data?: unknown) => void;
 
-// MVP: Cartoon が動けばOKな最小 elements
 const NONE = { kind: 'none' } as const;
-const HELIX = {
-  kind: 'helix',
-  flags: 0 as any,
-  type_id: 'HELX_P',
-  helix_class: '1',
-  details: 'override',
-} as const;
-const SHEET = {
-  kind: 'sheet',
-  flags: 0 as any,
-  sheet_id: 'SHEET1',
-} as const;
-
+const HELIX = { kind: 'helix', flags: 0 as any, type_id: 'HELX_P', helix_class: '1', details: 'override' } as const;
+const SHEET = { kind: 'sheet', flags: 0 as any, sheet_id: 'SHEET1' } as const;
 const ELEMENTS = [NONE, HELIX, SHEET] as any;
+
+function colValue(col: any, row: number) {
+  if (!col) return void 0;
+  if (typeof col.value === 'function') return col.value(row);
+  if (Array.isArray(col.value) || ArrayBuffer.isView(col.value)) return col.value[row];
+  if (typeof col === 'function') return col(row);
+  return void 0;
+}
+function asInt(v: any): number | undefined {
+  if (v == null) return void 0;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : void 0;
+}
+function resolveSeqId(residues: any, ri: number): number | undefined {
+  return (
+    asInt(colValue(residues.label_seq_id, ri)) ??
+    asInt(colValue(residues.auth_seq_id, ri)) ??
+    asInt(colValue(residues.seq_id, ri))
+  );
+}
+function resolveChainId(model: any, ri: number): string | undefined {
+  const residues: any = model?.atomicHierarchy?.residues;
+  const chains: any = model?.atomicHierarchy?.chains;
+
+  const direct =
+    (colValue(residues?.label_asym_id, ri) as string | undefined) ??
+    (colValue(residues?.auth_asym_id, ri) as string | undefined);
+  if (direct) return direct;
+
+  const chainIndex = asInt(colValue(residues?.chain_index, ri));
+  if (chainIndex != null) {
+    return (
+      (colValue(chains?.label_asym_id, chainIndex) as string | undefined) ??
+      (colValue(chains?.auth_asym_id, chainIndex) as string | undefined)
+    );
+  }
+
+  const segRes = model?.atomicHierarchy?.residueAtomSegments;
+  const segChain = model?.atomicHierarchy?.chainAtomSegments;
+  const offsets: any = segRes?.offsets;
+  const chainIndexByAtom: any = segChain?.index;
+
+  if (offsets && chainIndexByAtom && (offsets.length ?? 0) > ri) {
+    const startAtom = offsets[ri];
+    const ci = chainIndexByAtom[startAtom];
+    if (ci != null && ci >= 0) {
+      return (
+        (colValue(chains?.label_asym_id, ci) as string | undefined) ??
+        (colValue(chains?.auth_asym_id, ci) as string | undefined)
+      );
+    }
+  }
+
+  return void 0;
+}
 
 async function safeAttachSecondaryStructureProvider(plugin: PluginContext, structure: Structure, log?: LogFn) {
   const ctx: any = { runtime: plugin.runtime, assetManager: (plugin as any).managers?.asset };
@@ -47,53 +90,74 @@ async function safeAttachSecondaryStructureProvider(plugin: PluginContext, struc
   }
 }
 
-function pickRepresentativeTypes(ssOld: any) {
-  let helixType: any = undefined;
-  let sheetType: any = undefined;
+function pickRepresentativeTypes(ssOld: any, log?: LogFn) {
+  let helixType: number | undefined;
+  let sheetType: number | undefined;
 
-  const SST: any = SecondaryStructureType as any;
-  const isHelix = typeof SST.isHelix === 'function' ? SST.isHelix.bind(SST) : (t: any) => t !== 0;
-  const isSheet = typeof SST.isSheet === 'function' ? SST.isSheet.bind(SST) : (_t: any) => false;
+  const typeArr: any = ssOld?.type;
+  const keyArr: any = ssOld?.key;
+  const elements: any[] | undefined = ssOld?.elements;
 
-  for (let i = 0; i < (ssOld.type?.length ?? 0); i++) {
-    const t = ssOld.type[i];
-    if (helixType === undefined && isHelix(t) && !isSheet(t)) helixType = t;
-    if (sheetType === undefined && isSheet(t)) sheetType = t;
-    if (helixType !== undefined && sheetType !== undefined) break;
+  if (typeArr && keyArr && elements && typeof elements.length === 'number') {
+    const len = typeArr.length ?? 0;
+    for (let i = 0; i < len; i++) {
+      const elemIndex = keyArr[i];
+      const elem = elements[elemIndex];
+      const kind = typeof elem?.kind === 'string' ? elem.kind.toLowerCase() : '';
+      if (helixType === undefined && kind.includes('helix')) helixType = Number(typeArr[i]);
+      if (sheetType === undefined && (kind.includes('sheet') || kind.includes('beta'))) sheetType = Number(typeArr[i]);
+      if (helixType !== undefined && sheetType !== undefined) break;
+    }
   }
 
-  helixType ??= SST.Flag?.Helix ?? 1;
-  sheetType ??= SST.Flag?.Beta ?? SST.Flag?.Sheet ?? 2;
+  if (helixType === undefined || sheetType === undefined) {
+    const uniq: number[] = [];
+    const seen = new Set<number>();
+    const len = typeArr?.length ?? 0;
+    for (let i = 0; i < len; i++) {
+      const v = Number(typeArr[i]);
+      if (!Number.isFinite(v) || v <= 0) continue;
+      if (seen.has(v)) continue;
+      seen.add(v);
+      uniq.push(v);
+    }
+    uniq.sort((a, b) => a - b);
+    helixType ??= uniq[0] ?? 1;
+    sheetType ??= uniq[1] ?? uniq[0] ?? 2;
+    log?.('[SSE-Diag] pickRepresentativeTypes fallback:', { uniq, helixType, sheetType });
+  }
 
   return { helixType, sheetType };
 }
 
-function buildOverrideSecondaryStructureForUnit(
-  model: Model,
-  ssOld: any,
-  override: Map<string, SseLabel>,
-  log?: LogFn
-) {
-  const residues: any = (model as any).atomicHierarchy.residues;
-  const n: number = residues._rowCount;
+function buildOverrideSecondaryStructureForUnit(model: Model, ssOld: any, override: Map<string, SseLabel>, log?: LogFn) {
+  const residues: any = (model as any).atomicHierarchy?.residues;
+  const n: number = residues?._rowCount ?? 0;
 
   const len = ssOld.type.length;
-
   const type = new Uint32Array(len);
   const key = new Int32Array(len);
 
-  const { helixType, sheetType } = pickRepresentativeTypes(ssOld);
+  const { helixType, sheetType } = pickRepresentativeTypes(ssOld, log);
 
-  let setH = 0, setE = 0, setC = 0, hit = 0;
+  let setH = 0, setE = 0, setC = 0, hit = 0, skippedChain = 0, skippedSeq = 0;
 
   for (let ri = 0; ri < n; ri++) {
     const idx = ssOld.getIndex(ri as any as ResidueIndex) as number;
     if (idx < 0 || idx >= len) continue;
 
-    const chainId: string = residues.label_asym_id.value(ri);
-    const labelSeqId: number = residues.label_seq_id.value(ri);
-    const k = `${chainId}:${labelSeqId}`;
+    const chainId = resolveChainId(model, ri);
+    if (!chainId) {
+      skippedChain++;
+      continue;
+    }
+    const labelSeqId = resolveSeqId(residues, ri);
+    if (labelSeqId == null) {
+      skippedSeq++;
+      continue;
+    }
 
+    const k = residueKeyToString({ chainId, labelSeqId });
     const sse = override.get(k);
     if (sse) hit++;
 
@@ -117,24 +181,14 @@ function buildOverrideSecondaryStructureForUnit(
   try {
     (ELEMENTS[1] as any).flags = helixType;
     (ELEMENTS[2] as any).flags = sheetType;
-  } catch {
-    // ignore
-  }
+  } catch {}
 
-  log?.('[SSE-Diag] unit override stats:', { modelResidues: n, ssLen: len, hit, setH, setE, setC });
+  log?.('[SSE-Diag] unit override stats:', { modelResidues: n, ssLen: len, hit, skippedChain, skippedSeq, setH, setE, setC });
 
   return SecondaryStructure(type as any, key as any, ELEMENTS as any, ssOld.getIndex as any);
 }
 
-/**
- * Mol* の Structure computed property（SecondaryStructureProvider）を上書きする。
- * ✅ logger を渡すと “どこまで効いてるか” を詳細に追える
- */
-export async function applyOverrideSseToMolstarModel(
-  plugin: PluginContext,
-  output: SseEngineOutput,
-  log?: LogFn
-) {
+export async function applyOverrideSseToMolstarModel(plugin: PluginContext, output: SseEngineOutput, log?: LogFn) {
   const override = new Map<string, SseLabel>();
   for (const r of output.residues) override.set(residueKeyToString(r), r.sse);
   log?.('[SSE-Diag] override map size:', override.size);
@@ -145,10 +199,7 @@ export async function applyOverrideSseToMolstarModel(
 
   for (const s of structures) {
     const structure: Structure | undefined = s.cell.obj?.data;
-    if (!structure) {
-      log?.('[SSE-Diag] structure missing on cell');
-      continue;
-    }
+    if (!structure) continue;
 
     await safeAttachSecondaryStructureProvider(plugin, structure, log);
 
@@ -160,24 +211,9 @@ export async function applyOverrideSseToMolstarModel(
 
     const mapOld: any = prop.value;
     const oldIsMap = !!mapOld && typeof mapOld.get === 'function' && typeof mapOld.forEach === 'function';
-    let sampleKeyType: string | null = null;
-    try {
-      if (oldIsMap) {
-        const it = mapOld.keys().next();
-        if (!it.done) sampleKeyType = typeof it.value;
-      }
-    } catch {
-      // ignore
-    }
-
-    log?.('[SSE-Diag] ss prop:', {
-      version: prop.version ?? '(none)',
-      oldIsMap,
-      sampleKeyType,
-    });
+    log?.('[SSE-Diag] ss prop:', { version: prop.version ?? '(none)', oldIsMap });
 
     if (!oldIsMap) {
-      // まずは “入れ物が違う” ことをログで確定させる
       prop.value = new Map();
       prop.version = (prop.version ?? 0) + 1;
       log?.('[SSE-Diag] prop.value was not Map -> replaced with empty Map, version++');
@@ -198,21 +234,6 @@ export async function applyOverrideSseToMolstarModel(
       const ssNew = buildOverrideSecondaryStructureForUnit(u.model, ssOld, override, log);
       mapNew.set(unitId, ssNew);
       built++;
-    }
-
-    // units 経由で拾えないケースの保険（mapOldをそのまま舐める）
-    if (built === 0) {
-      log?.('[SSE-Diag] unitId lookup failed -> fallback to mapOld.forEach');
-      mapOld.forEach((ssOld: any, unitId: any) => {
-        const model: any =
-          (structure as any).models?.[0] ??
-          (structure as any).model ??
-          (structure as any).units?.[0]?.model;
-        if (!model || !ssOld?.type || typeof ssOld.getIndex !== 'function') return;
-        const ssNew = buildOverrideSecondaryStructureForUnit(model, ssOld, override, log);
-        mapNew.set(unitId, ssNew);
-        built++;
-      });
     }
 
     const prevVer = prop.version ?? 0;
