@@ -1,113 +1,224 @@
-import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
-import { ParamDefinition as PD } from 'molstar/lib/mol-util/param-definition';
-import { CustomStructureProperty } from 'molstar/lib/mol-model-props/common/custom-structure-property';
-import { Structure } from 'molstar/lib/mol-model/structure';
+// apps/sse-diag/src/molstar/sseOverrideProvider.ts
+import type { PluginContext } from 'molstar/lib/mol-plugin/context';
+import type { Structure } from 'molstar/lib/mol-model/structure';
+import type { Model } from 'molstar/lib/mol-model/structure/model';
+import type { ResidueIndex } from 'molstar/lib/mol-model/structure/model/indexing';
 
-import { SecondaryStructureProvider } from 'molstar/lib/mol-model-props/computed/secondary-structure';
 import { SecondaryStructure } from 'molstar/lib/mol-model/structure/model/properties/secondary-structure';
+import { SecondaryStructureProvider } from 'molstar/lib/mol-model-props/computed/secondary-structure';
+import { SecondaryStructureType } from 'molstar/lib/mol-model/structure/model/types';
 
 import type { SseEngineOutput, SseLabel } from '../domain/sse/types';
 import { residueKeyToString } from '../domain/sse/compare';
 
-/**
- * params（いまは最低限）
- * ※ PD.Params は使わない。PD.getDefaultValues を使う。
- */
-export const OverrideSseParams = {
-  enabled: PD.Boolean(true),
-};
-export type OverrideSseParams = PD.Values<typeof OverrideSseParams>;
+type LogFn = (msg: string, data?: unknown) => void;
 
-type OverrideProps = { output: SseEngineOutput };
+// MVP: Cartoon が動けばOKな最小 elements
+const NONE = { kind: 'none' } as const;
+const HELIX = {
+  kind: 'helix',
+  flags: 0 as any,
+  type_id: 'HELX_P',
+  helix_class: '1',
+  details: 'override',
+} as const;
+const SHEET = {
+  kind: 'sheet',
+  flags: 0 as any,
+  sheet_id: 'SHEET1',
+} as const;
 
-/**
- * output（WASM想定）を Mol* の SecondaryStructure 形式に変換
- * - Chainごと独立（keyに chainId を含めている）
- * - residue id は label_seq_id を使用
- */
-function buildSecondaryStructure(structure: Structure, output: SseEngineOutput): SecondaryStructure {
-  const model: any = (structure as any).model;
-  const residues = model.atomicHierarchy.residues;
-  const n: number = residues._rowCount;
+const ELEMENTS = [NONE, HELIX, SHEET] as any;
 
-  const wasmMap = new Map<string, SseLabel>();
-  for (const r of output.residues) wasmMap.set(residueKeyToString(r), r.sse);
+async function safeAttachSecondaryStructureProvider(plugin: PluginContext, structure: Structure, log?: LogFn) {
+  const ctx: any = { runtime: plugin.runtime, assetManager: (plugin as any).managers?.asset };
+  try {
+    await (SecondaryStructureProvider as any).attach(ctx, structure, void 0, true);
+    log?.('[SSE-Diag] SecondaryStructureProvider.attach(ctx, structure, void0, true) OK');
+    return;
+  } catch (e) {
+    log?.('[SSE-Diag] attach(…, true) failed:', e instanceof Error ? e.message : String(e));
+  }
+  try {
+    await (SecondaryStructureProvider as any).attach(ctx, structure);
+    log?.('[SSE-Diag] SecondaryStructureProvider.attach(ctx, structure) OK');
+  } catch (e) {
+    log?.('[SSE-Diag] attach(ctx, structure) failed:', e instanceof Error ? e.message : String(e));
+  }
+}
 
-  // Mol* 内部 enum は変更されやすいので、存在するものを優先的に拾う
-  const TypeObj: any = (SecondaryStructure as any).Type ?? {};
-  const FlagObj: any = TypeObj.Flag ?? TypeObj;
+function pickRepresentativeTypes(ssOld: any) {
+  let helixType: any = undefined;
+  let sheetType: any = undefined;
 
-  const HELIX = FlagObj.Helix ?? FlagObj.Alpha ?? 1;
-  const BETA  = FlagObj.Beta ?? FlagObj.Sheet ?? 2;
-  const NONE  = FlagObj.None ?? 0;
+  const SST: any = SecondaryStructureType as any;
+  const isHelix = typeof SST.isHelix === 'function' ? SST.isHelix.bind(SST) : (t: any) => t !== 0;
+  const isSheet = typeof SST.isSheet === 'function' ? SST.isSheet.bind(SST) : (_t: any) => false;
 
-  const type = new Int8Array(n);
-  type.fill(NONE);
-
-  for (let i = 0; i < n; i++) {
-    const chainId: string = residues.label_asym_id.value(i);
-    const labelSeqId: number = residues.label_seq_id.value(i);
-    const key = `${chainId}:${labelSeqId}`;
-
-    const sse = wasmMap.get(key) ?? 'C';
-    if (sse === 'H') type[i] = HELIX;
-    else if (sse === 'E') type[i] = BETA;
-    else type[i] = NONE;
+  for (let i = 0; i < (ssOld.type?.length ?? 0); i++) {
+    const t = ssOld.type[i];
+    if (helixType === undefined && isHelix(t) && !isSheet(t)) helixType = t;
+    if (sheetType === undefined && isSheet(t)) sheetType = t;
+    if (helixType !== undefined && sheetType !== undefined) break;
   }
 
-  // SecondaryStructure の実体は本来もう少し情報を持つが、Cartoon反映だけなら type が最重要
-  return { type } as unknown as SecondaryStructure;
+  helixType ??= SST.Flag?.Helix ?? 1;
+  sheetType ??= SST.Flag?.Beta ?? SST.Flag?.Sheet ?? 2;
+
+  return { helixType, sheetType };
+}
+
+function buildOverrideSecondaryStructureForUnit(
+  model: Model,
+  ssOld: any,
+  override: Map<string, SseLabel>,
+  log?: LogFn
+) {
+  const residues: any = (model as any).atomicHierarchy.residues;
+  const n: number = residues._rowCount;
+
+  const len = ssOld.type.length;
+
+  const type = new Uint32Array(len);
+  const key = new Int32Array(len);
+
+  const { helixType, sheetType } = pickRepresentativeTypes(ssOld);
+
+  let setH = 0, setE = 0, setC = 0, hit = 0;
+
+  for (let ri = 0; ri < n; ri++) {
+    const idx = ssOld.getIndex(ri as any as ResidueIndex) as number;
+    if (idx < 0 || idx >= len) continue;
+
+    const chainId: string = residues.label_asym_id.value(ri);
+    const labelSeqId: number = residues.label_seq_id.value(ri);
+    const k = `${chainId}:${labelSeqId}`;
+
+    const sse = override.get(k);
+    if (sse) hit++;
+
+    const v: SseLabel = sse ?? 'C';
+
+    if (v === 'H') {
+      type[idx] = helixType;
+      key[idx] = 1;
+      setH++;
+    } else if (v === 'E') {
+      type[idx] = sheetType;
+      key[idx] = 2;
+      setE++;
+    } else {
+      type[idx] = 0;
+      key[idx] = 0;
+      setC++;
+    }
+  }
+
+  try {
+    (ELEMENTS[1] as any).flags = helixType;
+    (ELEMENTS[2] as any).flags = sheetType;
+  } catch {
+    // ignore
+  }
+
+  log?.('[SSE-Diag] unit override stats:', { modelResidues: n, ssLen: len, hit, setH, setE, setC });
+
+  return SecondaryStructure(type as any, key as any, ELEMENTS as any, ssOld.getIndex as any);
 }
 
 /**
- * ★ここが技術コア★
- * descriptor.name を SecondaryStructureProvider.descriptor.name と同一にすることで、
- * Mol* 標準の computed secondary structure を “強制上書き” する。
+ * Mol* の Structure computed property（SecondaryStructureProvider）を上書きする。
+ * ✅ logger を渡すと “どこまで効いてるか” を詳細に追える
  */
-export const OverrideSecondaryStructureProvider = CustomStructureProperty.createProvider<
-  { params: typeof OverrideSseParams },
-  SecondaryStructure,
-  OverrideProps
->({
-  label: 'SSE-Diag Override Secondary Structure',
-  descriptor: { name: SecondaryStructureProvider.descriptor.name },
-  type: 'local',
+export async function applyOverrideSseToMolstarModel(
+  plugin: PluginContext,
+  output: SseEngineOutput,
+  log?: LogFn
+) {
+  const override = new Map<string, SseLabel>();
+  for (const r of output.residues) override.set(residueKeyToString(r), r.sse);
+  log?.('[SSE-Diag] override map size:', override.size);
 
-  defaultParams: PD.getDefaultValues(OverrideSseParams),
-  getParams: () => OverrideSseParams,
+  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
+  const structures = hierarchy?.structures ?? [];
+  log?.('[SSE-Diag] hierarchy.structures:', structures.length);
 
-  isApplicable: (s: Structure) => !!(s as any)?.model?.atomicHierarchy,
-
-  obtain: async (_ctx, structure, props) => {
-    const ss = buildSecondaryStructure(structure, props.output);
-    return { value: ss };
-  },
-});
-
-/**
- * 現在ロードされている structure に override を attach する
- */
-export async function attachOverrideSse(plugin: PluginUIContext, output: SseEngineOutput) {
-  // register（同名descriptorで上書きできるように）
-  plugin.customStructureProperties.register(OverrideSecondaryStructureProvider, true);
-
-  // 自動attachもON（なくても良いがMVPでは便利）
-  plugin.customStructureProperties.setDefaultAutoAttach(
-    OverrideSecondaryStructureProvider.descriptor.name,
-    true
-  );
-
-  await plugin.dataTransaction(async () => {
-    const structures = plugin.managers.structure.hierarchy.current.structures;
-    for (const s of structures) {
-      const structure = s.cell.obj?.data as Structure | undefined;
-      if (!structure) continue;
-
-      await plugin.customStructureProperties.attach(
-        OverrideSecondaryStructureProvider.descriptor.name,
-        structure,
-        { output }
-      );
+  for (const s of structures) {
+    const structure: Structure | undefined = s.cell.obj?.data;
+    if (!structure) {
+      log?.('[SSE-Diag] structure missing on cell');
+      continue;
     }
-  });
+
+    await safeAttachSecondaryStructureProvider(plugin, structure, log);
+
+    const prop: any = (SecondaryStructureProvider as any).get?.(structure);
+    if (!prop) {
+      log?.('[SSE-Diag] SecondaryStructureProvider.get(structure) returned null');
+      continue;
+    }
+
+    const mapOld: any = prop.value;
+    const oldIsMap = !!mapOld && typeof mapOld.get === 'function' && typeof mapOld.forEach === 'function';
+    let sampleKeyType: string | null = null;
+    try {
+      if (oldIsMap) {
+        const it = mapOld.keys().next();
+        if (!it.done) sampleKeyType = typeof it.value;
+      }
+    } catch {
+      // ignore
+    }
+
+    log?.('[SSE-Diag] ss prop:', {
+      version: prop.version ?? '(none)',
+      oldIsMap,
+      sampleKeyType,
+    });
+
+    if (!oldIsMap) {
+      // まずは “入れ物が違う” ことをログで確定させる
+      prop.value = new Map();
+      prop.version = (prop.version ?? 0) + 1;
+      log?.('[SSE-Diag] prop.value was not Map -> replaced with empty Map, version++');
+      continue;
+    }
+
+    const units: any[] = (structure as any).units ?? [];
+    log?.('[SSE-Diag] structure.units:', units.length);
+
+    const mapNew = new Map<any, any>();
+    let built = 0;
+
+    for (const u of units) {
+      const unitId = u.invariantId ?? u.id ?? u;
+      const ssOld = mapOld.get(unitId);
+      if (!ssOld?.type || typeof ssOld.getIndex !== 'function') continue;
+
+      const ssNew = buildOverrideSecondaryStructureForUnit(u.model, ssOld, override, log);
+      mapNew.set(unitId, ssNew);
+      built++;
+    }
+
+    // units 経由で拾えないケースの保険（mapOldをそのまま舐める）
+    if (built === 0) {
+      log?.('[SSE-Diag] unitId lookup failed -> fallback to mapOld.forEach');
+      mapOld.forEach((ssOld: any, unitId: any) => {
+        const model: any =
+          (structure as any).models?.[0] ??
+          (structure as any).model ??
+          (structure as any).units?.[0]?.model;
+        if (!model || !ssOld?.type || typeof ssOld.getIndex !== 'function') return;
+        const ssNew = buildOverrideSecondaryStructureForUnit(model, ssOld, override, log);
+        mapNew.set(unitId, ssNew);
+        built++;
+      });
+    }
+
+    const prevVer = prop.version ?? 0;
+    prop.value = mapNew;
+    prop.version = prevVer + 1;
+
+    log?.('[SSE-Diag] prop replaced:', { mapNewSize: mapNew.size, version: prop.version });
+  }
 }
