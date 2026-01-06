@@ -3,10 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 
 import { createMolstarPlugin, disposeMolstarPlugin } from '../molstar/plugin';
+import type { SseEngineOutput, SseLabel } from '../domain/sse/types';
 import { loadMmcifText } from '../molstar/load';
 import { extractResidueKeys } from '../molstar/extract';
 import { getMolstarStandardSse } from '../molstar/standardSse';
-import { rebuildCartoonOnly } from '../molstar/state';
+import { rebuildCartoonOnly, forceSecondaryStructureColorTheme } from '../molstar/state';
 
 import { PrototypeRuleEngine } from '../domain/sse/engines/prototypeRuleEngine';
 import { diffSse, residueKeyToString } from '../domain/sse/compare';
@@ -22,6 +23,7 @@ export default function MolstarSseDiagViewer() {
   const [mmcifText, setMmcifText] = useState('');
   const [rangeLo, setRangeLo] = useState(10);
   const [rangeHi, setRangeHi] = useState(20);
+  const [overrideEnabled, setOverrideEnabled] = useState(true);
 
   // UIログ（consoleに出なくても見える）
   const [logs, setLogs] = useState<string[]>([]);
@@ -45,6 +47,18 @@ export default function MolstarSseDiagViewer() {
     () => new PrototypeRuleEngine([rangeLo, rangeHi]),
     [rangeLo, rangeHi]
   );
+
+
+  async function applySseColorThemeNow() {
+    const plugin = pluginRef.current;
+    if (!plugin) return;
+    try {
+      const themeName = await forceSecondaryStructureColorTheme(plugin, pushLog);
+      pushLog('[SSE-Diag] applySseColorThemeNow done:', { themeName });
+    } catch (e) {
+      pushLog('[SSE-Diag] applySseColorThemeNow failed:', e instanceof Error ? e.message : String(e));
+    }
+  }
 
   useEffect(() => {
     let disposed = false;
@@ -118,9 +132,22 @@ export default function MolstarSseDiagViewer() {
       const residueKeys = extractResidueKeys(plugin, pushLog);
       pushLog('[SSE-Diag] residueKeys:', residueKeys.length);
 
-      pushLog('[SSE-Diag] engine.compute()');
-      const output = await engine.compute({ residues: residueKeys });
-      pushLog('[SSE-Diag] engine output residues:', output.residues.length);
+      pushLog('[SSE-Diag] overrideEnabled:', overrideEnabled);
+
+      let output: SseEngineOutput;
+      if (overrideEnabled) {
+        pushLog('[SSE-Diag] engine.compute()');
+        output = await engine.compute({ residues: residueKeys });
+        pushLog('[SSE-Diag] engine output residues:', output.residues.length);
+      } else {
+        pushLog('[SSE-Diag] override disabled -> restore Mol* standard SSE (baseline)');
+        output = outputFromMolstarMap(residueKeys, molstarMap);
+        pushLog('[SSE-Diag] baseline output residues:', output.residues.length);
+      }
+
+      // quick stats
+      pushLog('[SSE-Diag] molstarMap counts:', countLabelsFromMap(molstarMap));
+      pushLog('[SSE-Diag] output counts:', countLabelsFromOutput(output));
 
       // 4) ModelのSecondaryStructureProviderを直接上書き（ログ付き）
       pushLog('[SSE-Diag] applyOverrideSseToMolstarModel()');
@@ -128,7 +155,7 @@ export default function MolstarSseDiagViewer() {
 
       // 5) cartoon を作り直し（secondary-structure色で目視確認）
       pushLog('[SSE-Diag] rebuildCartoonOnly()');
-      await rebuildCartoonOnly(plugin);
+      await rebuildCartoonOnly(plugin, pushLog);
 
       // diff log
       const wasmMap = new Map<string, any>();
@@ -195,6 +222,7 @@ export default function MolstarSseDiagViewer() {
           style={{ width: '100%', marginBottom: 8 }}
         />
 
+
         <label style={{ fontSize: 12 }}>rangeHi</label>
         <input
           type="number"
@@ -202,15 +230,42 @@ export default function MolstarSseDiagViewer() {
           onChange={(e) => setRangeHi(Number(e.target.value))}
           style={{ width: '100%', marginBottom: 8 }}
         />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
+          <button style={{ flex: 1 }} disabled={!mmcifText} onClick={() => void runPipeline(mmcifText)}>
+            再解析（apply SSE → rebuild）
+          </button>
+        </div>
 
-        <button
-          style={{ width: '100%' }}
-          disabled={!mmcifText}
-          onClick={() => void runPipeline(mmcifText)}
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            marginBottom: 8,
+            padding: '6px 8px',
+            border: '1px solid #ddd',
+            borderRadius: 8,
+          }}
         >
-          再解析（override → rebuild）
-        </button>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={overrideEnabled}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setOverrideEnabled(v);
+                pushLog('[SSE-Diag] overrideEnabled set:', v);
+              }}
+            />
+            <span>Override（外部SSEで上書き）</span>
+            <span style={{ fontSize: 12, opacity: 0.7 }}>{overrideEnabled ? 'ON' : 'OFF'}</span>
+          </label>
 
+          <button type="button" onClick={() => void applySseColorThemeNow()} style={{ whiteSpace: 'nowrap' }}>
+            色をSSEに固定
+          </button>
+        </div>
+        
         {fatal && (
           <pre style={{ whiteSpace: 'pre-wrap', color: '#b00', background: '#fee', padding: 8, marginTop: 10 }}>
             {fatal}
@@ -264,4 +319,30 @@ function safeJson(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+
+function countLabelsFromMap(map: Map<string, SseLabel>) {
+  const out = { H: 0, E: 0, C: 0 };
+  for (const v of map.values()) out[v] += 1;
+  return out;
+}
+
+function countLabelsFromOutput(output: SseEngineOutput) {
+  const out = { H: 0, E: 0, C: 0 };
+  for (const r of output.residues) out[r.sse] += 1;
+  return out;
+}
+
+function outputFromMolstarMap(
+  residueKeys: { chainId: string; labelSeqId: number }[],
+  molstarMap: Map<string, SseLabel>
+): SseEngineOutput {
+  return {
+    residues: residueKeys.map((k) => ({
+      ...k,
+      sse: (molstarMap.get(residueKeyToString(k)) ?? 'C') as SseLabel,
+      energy: 0,
+    })),
+  };
 }
