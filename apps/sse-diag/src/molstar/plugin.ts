@@ -4,21 +4,24 @@ import { renderReact18 } from 'molstar/lib/mol-plugin-ui/react18';
 import { DefaultPluginUISpec, type PluginUISpec } from 'molstar/lib/mol-plugin-ui/spec';
 import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 
+const DEFAULT_EXPANDED = false; // ← true にすると Mol* の左右パネルを常時展開
+
 export async function createMolstarPlugin(target: HTMLElement): Promise<PluginUIContext> {
   // HMR/再マウント時の衝突を避ける
   target.innerHTML = '';
 
-  // ✅ Mol* UI（左右パネル等）を「必ず展開」して起動する
+  // Mol* UI を「右ペイン内」に閉じ込めるためのクラス（App.css側で使用）
+  target.classList.add('molstar-host');
+
   const base = DefaultPluginUISpec();
   const spec: PluginUISpec = {
     ...base,
     layout: {
       ...(base as any).layout,
       initial: {
-        // ここがポイント：折りたたみを解除
-        isExpanded: true,
+        ...((base as any).layout?.initial ?? {}),
+        isExpanded: DEFAULT_EXPANDED,
         showControls: true,
-        // "reactive" で十分。常時表示したいなら "always" でもOK
         controlsDisplay: 'reactive',
       },
     },
@@ -27,15 +30,14 @@ export async function createMolstarPlugin(target: HTMLElement): Promise<PluginUI
   const plugin = await createPluginUI({
     target,
     spec,
-    // ✅ 重要：React18レンダラ
     render: renderReact18,
   });
 
-  // さらに保険（バージョン差異・埋め込み環境で initial が効かないケース対策）
+  // 保険：initial が効かないケース対策
   try {
     const layout: any = (plugin as any).layout;
     layout?.setProps?.({
-      isExpanded: true,
+      isExpanded: DEFAULT_EXPANDED,
       showControls: true,
       controlsDisplay: 'reactive',
     });

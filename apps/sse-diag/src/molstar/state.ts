@@ -1,187 +1,125 @@
 // apps/sse-diag/src/molstar/state.ts
-import type { PluginContext } from 'molstar/lib/mol-plugin/context';
+import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 import { SecondaryStructureColorThemeProvider } from 'molstar/lib/mol-theme/color/secondary-structure';
 
-type LogFn = (msg: string, data?: unknown) => void;
-type ThemeRef = { name: string; params: Record<string, unknown> };
+/**
+ * 目的:
+ * - Mol* の GUI: Component → polymer → Set coloring → (Residue Property) → Secondary Structure
+ *   をコード側から強制する。
+ *
+ * 重要:
+ * - Mol* v5.5.0 の updateRepresentationsTheme は
+ *     updateRepresentationsTheme(components, { color, colorParams, ... })
+ *   であり、{ colorTheme: ... } ではない。
+ */
 
-function getColorThemeRegistry(plugin: PluginContext): any {
-  return (
-    (plugin as any).representation?.structure?.themes?.colorThemeRegistry ??
-    (plugin as any).managers?.structure?.themes?.colorThemeRegistry
-  );
+export type LogFn = (msg: string, data?: unknown) => void;
+
+function logf(log: LogFn | undefined, msg: string, data?: unknown) {
+  if (!log) return;
+  log(msg, data);
 }
 
-function ensureSecondaryStructureThemeRegistered(plugin: PluginContext, log?: LogFn) {
-  const reg = getColorThemeRegistry(plugin);
-  if (!reg) {
-    log?.('[SSE-Diag] ensureSecondaryStructureThemeRegistered: registry not found');
-    return;
-  }
-  try {
-    // 多重登録だと例外になる実装があるので握りつぶし
-    reg.add(SecondaryStructureColorThemeProvider);
-    log?.('[SSE-Diag] ensureSecondaryStructureThemeRegistered: added');
-  } catch (e) {
-    log?.('[SSE-Diag] ensureSecondaryStructureThemeRegistered: add failed', {
-      err: e instanceof Error ? e.message : String(e),
-    });
-  }
+function getHierarchy(plugin: PluginUIContext): any {
+  return (plugin as any).managers?.structure?.hierarchy?.current;
 }
 
-function resolveSecondaryStructureTheme(_plugin: PluginContext, log?: LogFn): ThemeRef {
-  // ここは固定でOK（Mol* 標準テーマ）
-  const theme: ThemeRef = { name: 'secondary-structure', params: {} };
-  log?.('[SSE-Diag] resolveSecondaryStructureTheme:', theme);
-  return theme;
-}
-
-function collectRepresentationCells(plugin: PluginContext): any[] {
-  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
-  const structures = hierarchy?.structures ?? [];
-  const cells: any[] = [];
-
+function getAllComponents(plugin: PluginUIContext): any[] {
+  const h = getHierarchy(plugin);
+  const structures: any[] = h?.structures ?? [];
+  const comps: any[] = [];
   for (const s of structures) {
-    const comps = s.components ?? [];
-    for (const c of comps) {
-      const reprs = c.representations ?? [];
-      for (const r of reprs) {
-        const cell = r.cell;
-        if (!cell?.transform?.params) continue;
-        cells.push(cell);
+    const cs: any[] = s?.components ?? [];
+    for (const c of cs) comps.push(c);
+  }
+  return comps;
+}
+
+function getFirstReprColorTheme(plugin: PluginUIContext) {
+  const h = getHierarchy(plugin);
+  const structures: any[] = h?.structures ?? [];
+  for (const s of structures) {
+    for (const c of s?.components ?? []) {
+      for (const r of c?.representations ?? []) {
+        const params = r?.cell?.transform?.params as any;
+        if (params?.colorTheme) return params.colorTheme;
       }
     }
   }
-
-  return cells;
-}
-
-async function applyColorThemeByStateUpdate(plugin: PluginContext, theme: ThemeRef, log?: LogFn) {
-  const cells = collectRepresentationCells(plugin);
-  if (!cells.length) {
-    log?.('[SSE-Diag] applyColorThemeByStateUpdate: no representation cells');
-    return { updated: 0, failed: 0 };
-  }
-
-  const dataState: any = (plugin as any).state?.data;
-  if (!dataState?.build) {
-    log?.('[SSE-Diag] applyColorThemeByStateUpdate: plugin.state.data.build not found');
-    return { updated: 0, failed: cells.length };
-  }
-
-  const b = dataState.build();
-  let updated = 0;
-  let failed = 0;
-
-  for (const cell of cells) {
-    try {
-      const ref = cell.transform.ref ?? cell.ref;
-      const oldParams = cell.transform.params ?? {};
-
-      // ✅ 実際に使われているのは params.colorTheme（ログで chain-id がここに居た）
-      const newParams = {
-        ...oldParams,
-        colorTheme: { name: theme.name, params: theme.params },
-      };
-
-      b.to(ref).update(newParams);
-      updated += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-
-  try {
-    await b.commit();
-  } catch (e) {
-    log?.('[SSE-Diag] applyColorThemeByStateUpdate: commit failed', {
-      err: e instanceof Error ? e.message : String(e),
-    });
-  }
-
-  return { updated, failed };
-}
-
-function debugDumpFirstReprTheme(plugin: PluginContext, log?: LogFn) {
-  try {
-    const cells = collectRepresentationCells(plugin);
-    if (!cells.length) return;
-
-    const p = cells[0]?.transform?.params;
-    log?.('[SSE-Diag] repr theme debug:', {
-      hasParams: !!p,
-      colorTheme: p?.colorTheme,
-    });
-  } catch {
-    // ignore
-  }
-}
-
-export async function forceSecondaryStructureColorTheme(plugin: PluginContext, log?: LogFn): Promise<string> {
-  const theme = resolveSecondaryStructureTheme(plugin, log);
-
-  ensureSecondaryStructureThemeRegistered(plugin, log);
-
-  // preset直後は 0ms でも1回 event loop を回すと安定することがある
-  await new Promise((r) => setTimeout(r, 0));
-
-  const result = await applyColorThemeByStateUpdate(plugin, theme, log);
-
-  log?.('[SSE-Diag] forceSecondaryStructureColorTheme done:', {
-    themeName: theme.name,
-    updated: result.updated,
-    failed: result.failed,
-  });
-
-  debugDumpFirstReprTheme(plugin, log);
-
-  return theme.name;
+  return null;
 }
 
 /**
- * cartoon 表現を作り直す（既存reprを消して preset を再適用）
- * 最後に secondary structure coloring を強制して「色が変わる」観測を安定させる
+ * 表示の coloring を「Secondary Structure」に寄せる
+ * (= GUI の Set coloring を自動で押すのと同等)
  */
-export async function rebuildCartoonOnly(plugin: PluginContext, log?: LogFn) {
-  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
-  const structures = hierarchy?.structures ?? [];
-  if (!structures.length) return;
+export async function forceSecondaryStructureColorTheme(
+  plugin: PluginUIContext,
+  log?: LogFn
+): Promise<string> {
+  const themeName = (SecondaryStructureColorThemeProvider as any).name ?? 'secondary-structure';
+
+  // 1) テーマ登録（既に登録済みなら例外が出ても無視でOK）
+  try {
+    const registry = (plugin as any).representation?.structure?.themes?.colorThemeRegistry;
+    if (registry?.add) {
+      try {
+        registry.add(SecondaryStructureColorThemeProvider);
+      } catch (e) {
+        // "already registered." 想定
+        logf(log, '[SSE-Diag] ensureSecondaryStructureThemeRegistered', { err: String(e) });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2) すべての polymer component に対してテーマ適用
+  const comps = getAllComponents(plugin);
+  if (comps.length === 0) {
+    logf(log, '[SSE-Diag] forceSecondaryStructureColorTheme: no components yet');
+    return themeName;
+  }
+
+  const mgr: any = (plugin as any).managers?.structure?.component;
+  const fn = mgr?.updateRepresentationsTheme;
+  if (typeof fn !== 'function') {
+    logf(log, '[SSE-Diag] forceSecondaryStructureColorTheme: updateRepresentationsTheme missing');
+    return themeName;
+  }
+
+  // ★ここが本丸: { color } が正しい
+  await fn.call(mgr, comps, { color: themeName });
+
+  // 3) 反映確認ログ（任意）
+  const after = getFirstReprColorTheme(plugin);
+  logf(log, '[SSE-Diag] forceSecondaryStructureColorTheme applied', { themeName, after });
+
+  return themeName;
+}
+
+/**
+ * SSE override の後に cartoon 表示だけ作り直す（POC用途）
+ *
+ * - preset を再適用すると coloring がデフォルト（chain-id等）に戻るので、
+ *   最後に forceSecondaryStructureColorTheme() を必ず呼ぶ。
+ */
+export async function rebuildCartoonOnly(plugin: PluginUIContext, log?: LogFn): Promise<void> {
+  const h = getHierarchy(plugin);
+  const structures: any[] = h?.structures ?? [];
+  if (structures.length === 0) return;
 
   for (const s of structures) {
-    const cell = s.cell;
+    const cell = s?.cell;
+    if (!cell) continue;
 
-    // 既存reprをまとめて削除
+    // polymer-cartoon があれば優先、ダメなら default
     try {
-      const reprs = s.components?.flatMap((c: any) => c.representations ?? []) ?? [];
-      for (const r of reprs) {
-        try {
-          await (plugin as any).builders.structure.representation.removeRepresentation(r.cell);
-        } catch {
-          // ignore
-        }
-      }
+      await (plugin as any).builders?.structure?.representation?.applyPreset?.(cell, 'polymer-cartoon');
     } catch {
-      // ignore
+      await (plugin as any).builders?.structure?.representation?.applyPreset?.(cell, 'default');
     }
-
-    // presetを再適用（cartoon優先）
-    try {
-      await (plugin as any).builders.structure.representation.applyPreset(cell, 'polymer-cartoon');
-      await forceSecondaryStructureColorTheme(plugin, log);
-      continue;
-    } catch {
-      // ignore
-    }
-
-    // fallback
-    try {
-      await (plugin as any).builders.structure.representation.applyPreset(cell, 'default');
-      await forceSecondaryStructureColorTheme(plugin, log);
-      continue;
-    } catch {
-      // ignore
-    }
-
-    // どうしてもダメなら何もしない
   }
+
+  await forceSecondaryStructureColorTheme(plugin, log);
 }

@@ -1,4 +1,5 @@
 import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
+import { forceSecondaryStructureColorTheme } from './state';
 
 export async function loadMmcifText(plugin: PluginUIContext, mmcifText: string) {
   await plugin.clear();
@@ -10,4 +11,7 @@ export async function loadMmcifText(plugin: PluginUIContext, mmcifText: string) 
   await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default', {
     representationPreset: 'auto',
   });
+
+  // ✅ デフォルトの「Set coloring」を Secondary Structure に寄せる
+  await forceSecondaryStructureColorTheme(plugin as any);
 }

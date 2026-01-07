@@ -2,7 +2,9 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import 'molstar/build/viewer/molstar.css';
 import "molstar/lib/mol-plugin-ui/skin/light.scss";
+import './App.css'
 import './index.css'
+
 
 
 createRoot(document.getElementById('root')!).render(
