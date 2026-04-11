@@ -24,7 +24,21 @@ export class PrototypeRuleEngine {
       energy: 0,
     }));
 
-    return { residues: out };
+    return {
+      residues: out,
+      metadata: {
+        engine_id: 'prototype-rule',
+        engine_name: 'Prototype rule',
+        engine_version: '0.1.0',
+        engine_stage: 'prototype',
+        engine_input_schema_version: 'sse-engine-input/v1',
+        engine_params: {
+          rangeLo: this.rangeLo,
+          rangeHi: this.rangeHi,
+        },
+        computed_at: new Date().toISOString(),
+      },
+    };
   }
 
   private assign(labelSeqId: number): SseLabel {

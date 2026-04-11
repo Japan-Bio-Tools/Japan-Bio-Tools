@@ -1,23 +1,21 @@
-# Security & Privacy (Local-only)
+# Security & Privacy（Local-only / 外部送信しない）
 
-## Data handling
+## データ取り扱い（最重要）
+- ツールは **ユーザーのローカルファイル（PDB/mmCIF）** をブラウザで読み込む。
+- **読み込んだ構造データを外部サーバへ送信しない。**
+- 解析・可視化・差分生成は **ブラウザ内（JS/WASM）で完結**させる。
 
-- The tools accept **local user files** (PDB/mmCIF) via browser file picker.
-- The application must not upload these files to external servers.
+## ネットワーク方針
+- 原則として「PDB IDで外部取得」は実装しない（ローカル投入を基本にする）。
+- Analytics/Telemetry SDK は原則入れない（入れるなら用途と送信内容を明記し、オプトインにする）。
+- 将来、外部取得を例外的に導入する場合でも **明示的なオプトイン**とし、本ドキュメントに追記する。
 
-## Network policy
+## ホスティング
+- GitHub Pages に静的ホスティングする。
+- 生成物は `dist/` の静的ファイルのみ。
+- バックエンドサービスは使わない。
 
-- Do not implement “fetch by PDB ID”.
-- Avoid adding analytics/telemetry SDKs.
-- Any future external fetch (if ever) must be opt-in, explicit, and documented here.
-
-## Build & hosting
-
-- Hosted on GitHub Pages.
-- Build artifacts are static files only (`dist/`).
-- No backend services are used.
-
-## Developer checklist (PR review)
-- [ ] No code path uploads file content
-- [ ] No dependency introduces hidden network calls
-- [ ] Any optional external fetch is clearly opt-in and documented
+## PRレビュー用チェックリスト
+- [ ] ファイル内容を外部送信するコード経路がない
+- [ ] 依存関係が “勝手に通信” しない（SDK/Telemetry等）
+- [ ] 例外的な外部取得がある場合、オプトインで、ここに仕様が追記されている

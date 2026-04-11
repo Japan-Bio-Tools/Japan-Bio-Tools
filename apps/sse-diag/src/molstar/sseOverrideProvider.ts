@@ -17,6 +17,18 @@ const HELIX = { kind: 'helix', flags: 0 as any, type_id: 'HELX_P', helix_class: 
 const SHEET = { kind: 'sheet', flags: 0 as any, sheet_id: 'SHEET1' } as const;
 const ELEMENTS = [NONE, HELIX, SHEET] as any;
 
+type SecondaryStructureMap = Map<any, any>;
+
+type BaselineSnapshotEntry = {
+  structure: Structure;
+  value: SecondaryStructureMap;
+  version: number;
+};
+
+export type SecondaryStructureBaselineSnapshot = {
+  entries: BaselineSnapshotEntry[];
+};
+
 function colValue(col: any, row: number) {
   if (!col) return void 0;
   if (typeof col.value === 'function') return col.value(row);
@@ -73,6 +85,46 @@ function resolveChainId(model: any, ri: number): string | undefined {
   return void 0;
 }
 
+function getCurrentStructures(plugin: PluginContext): Structure[] {
+  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
+  const structures = hierarchy?.structures ?? [];
+  const out: Structure[] = [];
+
+  for (const s of structures) {
+    const structure: Structure | undefined = s?.cell?.obj?.data;
+    if (structure) out.push(structure);
+  }
+
+  return out;
+}
+
+function cloneSecondaryStructureMap(value: unknown): SecondaryStructureMap | null {
+  if (!value || typeof (value as any).get !== 'function' || typeof (value as any).forEach !== 'function') {
+    return null;
+  }
+
+  return new Map(value as SecondaryStructureMap);
+}
+
+function replaceSecondaryStructureProviderValue(
+  structure: Structure,
+  value: SecondaryStructureMap,
+  log: LogFn | undefined,
+  stage: string
+) {
+  const prop: any = (SecondaryStructureProvider as any).get?.(structure);
+  if (!prop) {
+    log?.(`[SSE-Diag] ${stage}: SecondaryStructureProvider.get(structure) returned null`);
+    return false;
+  }
+
+  const prevVersion = prop.version ?? 0;
+  prop.value = cloneSecondaryStructureMap(value) ?? new Map(value);
+  prop.version = prevVersion + 1;
+  log?.(`[SSE-Diag] ${stage}: prop replaced`, { mapSize: prop.value.size, version: prop.version });
+  return true;
+}
+
 async function safeAttachSecondaryStructureProvider(plugin: PluginContext, structure: Structure, log?: LogFn) {
   const ctx: any = { runtime: (plugin as any).runtime, assetManager: (plugin as any).managers?.asset };
   try {
@@ -88,6 +140,69 @@ async function safeAttachSecondaryStructureProvider(plugin: PluginContext, struc
   } catch (e) {
     log?.('[SSE-Diag] attach(ctx, structure) failed:', e instanceof Error ? e.message : String(e));
   }
+}
+
+export async function captureBaselineSecondaryStructureSnapshot(
+  plugin: PluginContext,
+  log?: LogFn
+): Promise<SecondaryStructureBaselineSnapshot> {
+  const structures = getCurrentStructures(plugin);
+  log?.('[SSE-Diag] baseline snapshot capture start:', { structures: structures.length });
+
+  const entries: BaselineSnapshotEntry[] = [];
+
+  for (const structure of structures) {
+    await safeAttachSecondaryStructureProvider(plugin, structure, log);
+
+    const prop: any = (SecondaryStructureProvider as any).get?.(structure);
+    const value = cloneSecondaryStructureMap(prop?.value);
+
+    if (!value) {
+      log?.('[SSE-Diag] baseline snapshot capture skipped: prop.value is not Map');
+      continue;
+    }
+
+    entries.push({
+      structure,
+      value,
+      version: prop.version ?? 0,
+    });
+  }
+
+  log?.('[SSE-Diag] baseline snapshot capture done:', { entries: entries.length });
+  return { entries };
+}
+
+export async function restoreBaselineSecondaryStructureSnapshot(
+  plugin: PluginContext,
+  snapshot: SecondaryStructureBaselineSnapshot,
+  log?: LogFn
+): Promise<void> {
+  const currentStructures = new Set(getCurrentStructures(plugin));
+  log?.('[SSE-Diag] baseline restore start:', {
+    snapshotEntries: snapshot.entries.length,
+    currentStructures: currentStructures.size,
+  });
+
+  let restored = 0;
+  let skippedStale = 0;
+
+  for (const entry of snapshot.entries) {
+    if (!currentStructures.has(entry.structure)) {
+      skippedStale++;
+      continue;
+    }
+
+    const didRestore = replaceSecondaryStructureProviderValue(
+      entry.structure,
+      entry.value,
+      log,
+      'baseline restore'
+    );
+    if (didRestore) restored++;
+  }
+
+  log?.('[SSE-Diag] baseline restore done:', { restored, skippedStale });
 }
 
 function pickRepresentativeTypes(ssOld: any, log?: LogFn) {
@@ -198,7 +313,7 @@ export async function applyOverrideSseToMolstarModel(plugin: PluginContext, outp
   log?.('[SSE-Diag] hierarchy.structures:', structures.length);
 
   for (const s of structures) {
-    const structure: Structure | undefined = s.cell.obj?.data;
+    const structure: Structure | undefined = s?.cell?.obj?.data;
     if (!structure) continue;
 
     await safeAttachSecondaryStructureProvider(plugin, structure, log);
@@ -214,9 +329,7 @@ export async function applyOverrideSseToMolstarModel(plugin: PluginContext, outp
     log?.('[SSE-Diag] ss prop:', { version: prop.version ?? '(none)', oldIsMap });
 
     if (!oldIsMap) {
-      prop.value = new Map();
-      prop.version = (prop.version ?? 0) + 1;
-      log?.('[SSE-Diag] prop.value was not Map -> replaced with empty Map, version++');
+      log?.('[SSE-Diag] prop.value was not Map -> override skipped to preserve current display');
       continue;
     }
 
@@ -234,6 +347,11 @@ export async function applyOverrideSseToMolstarModel(plugin: PluginContext, outp
       const ssNew = buildOverrideSecondaryStructureForUnit(u.model, ssOld, override, log);
       mapNew.set(unitId, ssNew);
       built++;
+    }
+
+    if (built === 0) {
+      log?.('[SSE-Diag] override produced no unit secondary structure -> provider unchanged');
+      continue;
     }
 
     const prevVer = prop.version ?? 0;

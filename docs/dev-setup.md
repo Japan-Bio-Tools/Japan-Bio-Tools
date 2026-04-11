@@ -1,62 +1,57 @@
-### `docs/dev-setup.md`
-```md
 # Dev Setup
 
 ## Requirements
-
-- Node: v24.x (repo uses Node 24 in GitHub Actions)
+- Node: v24.x（GitHub Actions と揃える）
 - npm: v11.x
 
 ## Install
-
-At repository root:
+リポジトリルートで：
 
 ```bash
 npm ci
-````
-
-## Run (dev server)
-
-```bash
-npm run dev:portal
-npm run dev:sse-diag
-npm run dev:tool-b
-```
-
-Each command delegates to the corresponding workspace under `apps/*`.
-
-## Build (GitHub Pages)
-
-This repository deploys **GitHub Pages from the root `dist/`** directory.
-
-Build combined dist:
-
-```bash
+Local dev
+sse-diag を起動
+bash
+コードをコピーする
+npm -w apps/sse-diag run dev
+portal を起動
+bash
+コードをコピーする
+npm -w apps/portal run dev
+tool-b を起動
+bash
+コードをコピーする
+npm -w apps/tool-b run dev
+Build
+個別ビルド（例：sse-diag）
+bash
+コードをコピーする
+npm -w apps/sse-diag run build
+Pages用（dist統合）
+bash
+コードをコピーする
 npm run build:pages
-```
+Notes
+Vite base
+GitHub Pages 配下でアセット解決するため、各アプリは base を固定する。
 
-What it does:
+portal: /Japan-Bio-Tools/
 
-1. Builds each workspace:
+sse-diag: /Japan-Bio-Tools/sse-diag/
 
-   * `apps/portal`
-   * `apps/sse-diag`
-   * `apps/tool-b`
-2. Copies their `apps/*/dist` into a single root `dist/`:
+tool-b: /Japan-Bio-Tools/tool-b/
 
-   * portal -> `dist/`
-   * sse-diag -> `dist/sse-diag/`
-   * tool-b -> `dist/tool-b/`
-3. Writes `dist/.nojekyll`
+リポジトリ名を変更した場合は、各 app の base を合わせて更新する。
 
-## Notes
+Windows / OneDrive の注意
+OneDrive 同期下でビルドが不安定になることがある（ローカルで問題→GitHub ActionsではOK、など）
 
-### Vite `base`
+変なビルド落ちが続く場合は、同期の影響を疑って作業ディレクトリを移す
 
-Each app uses a fixed `base` so that assets resolve under GitHub Pages.
+yaml
+コードをコピーする
 
-* portal: `/Japan-Bio-Tools/`
-* sse-diag: `/Japan-Bio-Tools/sse-diag/`
-* tool-b: `/Japan-Bio-Tools/tool-b/`
+---
 
-If you rename the repository, update these `base` values accordingly.
+もし次に「差分が出る診断UI（HUD/トグル/差分表/クリックハイライト）」までドキュメントに踏み込むなら、**roadmap.md と 引継ぎ資料.md に “MVP-0のExit条件（Aha体験）” をもう少し定量化**（例：クリックでフォーカス、diff上位N表示、所要操作数など）して、ブレないようにもできます。
+::contentReference[oaicite:0]{index=0}

@@ -1,5 +1,73 @@
 export type SseLabel = 'H' | 'E' | 'C';
 
+export type ComparisonStatus = 'full' | 'partial' | 'baseline_only';
+
+export type SseViewMode = 'baseline' | 'override';
+
+export type SseEngineStage = 'prototype' | 'experimental' | 'reference_like';
+
+export type MetricValue<T> =
+  | { available: true; value: T }
+  | { available: false; value: null; reason?: string };
+
+export type SseEngineMetadata = {
+  engine_id: string;
+  engine_name: string;
+  engine_version: string;
+  engine_stage: SseEngineStage;
+  engine_input_schema_version: string;
+  engine_params?: Record<string, string | number | boolean | null>;
+  computed_at?: string;
+};
+
+export type ComparisonContractSummary = {
+  model_policy: string;
+  residue_key_policy: string;
+  mapping_basis: string;
+  engine_summary: string;
+};
+
+export type DiffKind =
+  | 'LabelFlip_HC'
+  | 'LabelFlip_EC'
+  | 'LabelFlip_HE'
+  | 'BoundaryShift'
+  | 'Singleton'
+  | 'Other';
+
+export type DiffKindLabel =
+  | 'Helix/Coil反転'
+  | 'Sheet/Coil反転'
+  | 'Helix/Sheet反転'
+  | '境界ズレ'
+  | '孤立差分'
+  | 'その他';
+
+export type DiffRow = {
+  residue_key: string;
+  display_residue: string;
+  baseline_label: SseLabel;
+  override_label: SseLabel;
+  kind: DiffKind;
+  kind_label: DiffKindLabel;
+  sort_key: number;
+  filterable: boolean;
+};
+
+export type SseComparisonSummary = {
+  comparison_status: ComparisonStatus;
+  view_mode: SseViewMode;
+  engine_metadata: SseEngineMetadata | null;
+  comparable_count: MetricValue<number>;
+  candidate_count: MetricValue<number>;
+  mapped_count: MetricValue<number>;
+  mapped_rate: MetricValue<number>;
+  unmapped_total: MetricValue<number>;
+  ambiguous_count: MetricValue<number>;
+  review_points_count: MetricValue<number>;
+  contract_summary: ComparisonContractSummary;
+};
+
 export type ResidueKey = {
   chainId: string;      // label_asym_id
   labelSeqId: number;   // label_seq_id
@@ -16,6 +84,7 @@ export type SseEngineInput = {
 
 export type SseEngineOutput = {
   residues: ResidueSseRecord[];
+  metadata?: SseEngineMetadata;
 };
 
 export type SseResidueKey = ResidueKey;

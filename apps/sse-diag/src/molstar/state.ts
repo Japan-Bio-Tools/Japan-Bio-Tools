@@ -107,7 +107,11 @@ export async function forceSecondaryStructureColorTheme(
 export async function rebuildCartoonOnly(plugin: PluginUIContext, log?: LogFn): Promise<void> {
   const h = getHierarchy(plugin);
   const structures: any[] = h?.structures ?? [];
-  if (structures.length === 0) return;
+  logf(log, '[SSE-Diag] rebuild start:', { structures: structures.length });
+  if (structures.length === 0) {
+    logf(log, '[SSE-Diag] rebuild skipped: no structures');
+    return;
+  }
 
   for (const s of structures) {
     const cell = s?.cell;
@@ -116,10 +120,14 @@ export async function rebuildCartoonOnly(plugin: PluginUIContext, log?: LogFn): 
     // polymer-cartoon があれば優先、ダメなら default
     try {
       await (plugin as any).builders?.structure?.representation?.applyPreset?.(cell, 'polymer-cartoon');
-    } catch {
+      logf(log, '[SSE-Diag] rebuild preset applied:', 'polymer-cartoon');
+    } catch (e) {
+      logf(log, '[SSE-Diag] rebuild polymer-cartoon failed, fallback default:', e instanceof Error ? e.message : String(e));
       await (plugin as any).builders?.structure?.representation?.applyPreset?.(cell, 'default');
+      logf(log, '[SSE-Diag] rebuild preset applied:', 'default');
     }
   }
 
   await forceSecondaryStructureColorTheme(plugin, log);
+  logf(log, '[SSE-Diag] rebuild done');
 }
