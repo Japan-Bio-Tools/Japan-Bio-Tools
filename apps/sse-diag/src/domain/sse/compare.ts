@@ -33,6 +33,8 @@ export function diffSse(
   molstar: Map<string, SseLabel>,
   wasm: Map<string, SseLabel>
 ): SseDiff[] {
+  // Legacy helper kept for narrow compatibility paths.
+  // Main comparison flow should use buildSseMappingResult() so mapping classes/stats stay consistent.
   const diffs: SseDiff[] = [];
   for (const [key, m] of molstar.entries()) {
     const w = wasm.get(key);

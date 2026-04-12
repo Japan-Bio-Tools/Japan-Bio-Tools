@@ -1,17 +1,23 @@
 // apps/sse-diag/src/domain/sse/engines/prototypeRuleEngine.ts
 import type { SseEngineInput, SseEngineOutput, SseResidueKey, SseLabel } from '../types';
+import type { SseEngine, SseEngineDescriptor, SseEngineFactoryParams } from '../engine';
 
 /**
  * MVP用：範囲内だけ Sheet(E)、それ以外 Helix(H)
  * - input.residues が Array でなくても落ちないように強制的に配列化する
  */
-export class PrototypeRuleEngine {
+const DEFAULT_RANGE_LO = 10;
+const DEFAULT_RANGE_HI = 20;
+
+export const PROTOTYPE_RULE_ENGINE_KEY = 'prototype.rule';
+
+export class PrototypeRuleEngine implements SseEngine {
   private rangeLo: number;
   private rangeHi: number;
 
   constructor(range?: [number, number]) {
-    this.rangeLo = range?.[0] ?? 10;
-    this.rangeHi = range?.[1] ?? 20;
+    this.rangeLo = range?.[0] ?? DEFAULT_RANGE_LO;
+    this.rangeHi = range?.[1] ?? DEFAULT_RANGE_HI;
   }
 
   async compute(input: SseEngineInput): Promise<SseEngineOutput> {
@@ -37,7 +43,7 @@ export class PrototypeRuleEngine {
           residue_count: residues.length,
           residue_key_policy: 'label_asym_id + label_seq_id',
         },
-        engine_params: {
+        effective_params: {
           rangeLo: this.rangeLo,
           rangeHi: this.rangeHi,
         },
@@ -50,6 +56,32 @@ export class PrototypeRuleEngine {
     return labelSeqId >= this.rangeLo && labelSeqId <= this.rangeHi ? 'E' : 'H';
   }
 }
+
+function readRangeParam(
+  params: SseEngineFactoryParams,
+  key: 'rangeLo' | 'rangeHi',
+  fallback: number
+): number {
+  const raw = params[key];
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+export const prototypeRuleEngineDescriptor: SseEngineDescriptor = {
+  engine_key: PROTOTYPE_RULE_ENGINE_KEY,
+  engine_id: 'prototype-rule',
+  engine_name: 'Prototype rule',
+  engine_stage: 'prototype',
+  create(params: SseEngineFactoryParams): SseEngine {
+    const rangeLo = readRangeParam(params, 'rangeLo', DEFAULT_RANGE_LO);
+    const rangeHi = readRangeParam(params, 'rangeHi', DEFAULT_RANGE_HI);
+    return new PrototypeRuleEngine([rangeLo, rangeHi]);
+  },
+};
 
 /** Set/Map/オブジェクトでも落ちないようにする */
 function normalizeResidues(residues: unknown): SseResidueKey[] {

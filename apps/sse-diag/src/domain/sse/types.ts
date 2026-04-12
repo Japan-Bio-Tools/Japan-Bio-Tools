@@ -16,8 +16,8 @@ export type SseEngineMetadata = {
   engine_version: string;
   engine_stage: SseEngineStage;
   engine_input_schema_version: string;
-  input_profile?: Record<string, string | number | boolean | null>;
-  engine_params?: Record<string, string | number | boolean | null>;
+  input_profile: Record<string, string | number | boolean | null>;
+  effective_params?: Record<string, string | number | boolean | null>;
   computed_at?: string;
 };
 
@@ -25,6 +25,9 @@ export type ComparisonContractSummary = {
   model_policy: string;
   residue_key_policy: string;
   mapping_basis: string;
+  mapped_count: number | null;
+  candidate_count: number | null;
+  mapped_rate: number | null;
   engine_summary: string;
 };
 
@@ -39,13 +42,37 @@ export type ComparisonContractDetail = {
 
 export type DiagnosisStage = 'not_ready' | 'baseline_ready' | 'override_ready' | 'comparison_ready';
 
-export type ExecutionRecord = {
+export type DiagnosisRecord = {
   diagnosis_stage: DiagnosisStage;
   baseline_ready: boolean;
   override_ready: boolean;
   comparison_ready: boolean;
   updated_at: string | null;
   note: string;
+};
+
+export type EngineResolutionMode = 'direct' | 'default_used' | 'failed_unknown_key';
+
+export type EngineExecutionStatus =
+  | 'running'
+  | 'failed_resolution'
+  | 'failed_execution'
+  | 'completed'
+  | 'discarded_stale';
+
+export type EngineExecutionRecord = {
+  run_id: string;
+  requested_engine_key: string | null;
+  resolved_engine_id: string | null;
+  resolution_mode: EngineResolutionMode;
+  status: EngineExecutionStatus;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  engine_name: string | null;
+  engine_version: string | null;
+  engine_stage: SseEngineStage | null;
+  effective_params?: Record<string, string | number | boolean | null>;
 };
 
 export type DiffKind =
@@ -88,7 +115,8 @@ export type SseComparisonSummary = {
   review_points_count: MetricValue<number>;
   contract_summary: ComparisonContractSummary;
   contract_detail: ComparisonContractDetail;
-  execution_record: ExecutionRecord;
+  diagnosis_record: DiagnosisRecord;
+  engine_execution_record: EngineExecutionRecord | null;
 };
 
 export type ResidueKey = {
