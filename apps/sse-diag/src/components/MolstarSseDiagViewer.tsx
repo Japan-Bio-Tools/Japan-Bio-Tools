@@ -5,7 +5,9 @@ import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 import { createMolstarPlugin, disposeMolstarPlugin } from '../molstar/plugin';
 import type {
   ComparisonStatus,
+  DiagnosisStage,
   DiffRow,
+  ExecutionRecord,
   MetricValue,
   SseComparisonSummary,
   SseEngineOutput,
@@ -15,12 +17,12 @@ import type {
   SseViewMode,
 } from '../domain/sse/types';
 import { loadMmcifText } from '../molstar/load';
-import { extractResidueKeys } from '../molstar/extract';
+import { extractResidueDisplayLabels, extractResidueKeys } from '../molstar/extract';
 import { getMolstarStandardSse } from '../molstar/standardSse';
 import { rebuildCartoonOnly, forceSecondaryStructureColorTheme } from '../molstar/state';
 
 import { PrototypeRuleEngine } from '../domain/sse/engines/prototypeRuleEngine';
-import { diffSse, residueKeyToString } from '../domain/sse/compare';
+import { buildSseMappingResult, type SseMappingResult } from '../domain/sse/compare';
 import { classifyDiffRows } from '../domain/sse/classifyDiff';
 import {
   applyOverrideSseToMolstarModel,
@@ -61,6 +63,7 @@ export default function MolstarSseDiagViewer() {
   const baselineSnapshotRef = useRef<SecondaryStructureBaselineSnapshot | null>(null);
   const baselineMapRef = useRef<Map<string, SseLabel> | null>(null);
   const residueKeysRef = useRef<SseResidueKey[]>([]);
+  const residueDisplayLabelMapRef = useRef<Map<string, string>>(new Map());
   const overrideOutputCacheRef = useRef<OverrideOutputCache | null>(null);
   const selectedDiffIndexRef = useRef<number | null>(null);
   const selectedResidueKeyRef = useRef<string | null>(null);
@@ -340,6 +343,7 @@ export default function MolstarSseDiagViewer() {
     baselineSnapshotRef.current = null;
     baselineMapRef.current = null;
     residueKeysRef.current = [];
+    residueDisplayLabelMapRef.current = new Map();
     overrideOutputCacheRef.current = null;
     setDiffRows([]);
     applySelectionState(null, [], `${reason}: reset`, { focus: false });
@@ -434,6 +438,7 @@ export default function MolstarSseDiagViewer() {
   function updateHudSummaryForOutput(
     baselineMap: Map<string, SseLabel> | null,
     output: SseEngineOutput | null,
+    mapping: SseMappingResult | null,
     nextStatus: ComparisonStatus,
     reviewPoints: MetricValue<number>,
     reason: string
@@ -442,6 +447,7 @@ export default function MolstarSseDiagViewer() {
       buildComparisonSummary({
         baselineMap,
         output,
+        mapping,
         comparisonStatus: nextStatus,
         viewMode: viewModeRef.current,
         reviewPoints,
@@ -451,35 +457,30 @@ export default function MolstarSseDiagViewer() {
   }
 
   function updateDiffRows(
-    baselineMap: Map<string, SseLabel> | null,
-    output: SseEngineOutput | null,
+    mapping: SseMappingResult | null,
     reason: string
   ) {
-    if (!baselineMap || !output || output.residues.length === 0) {
+    if (!mapping) {
       setDiffRows([]);
       applySelectionState(null, [], `${reason}: no diff rows`, { focus: false });
       pushLog('[SSE-Diag] diff rows skipped:', {
         reason,
-        hasBaseline: !!baselineMap,
-        hasOverride: !!output && output.residues.length > 0,
+        hasMapping: false,
       });
       return;
     }
 
-    const overrideMap = new Map<string, SseLabel>();
-    for (const r of output.residues) overrideMap.set(residueKeyToString(r), r.sse);
-
-    let mappedCount = 0;
-    for (const key of baselineMap.keys()) {
-      if (overrideMap.has(key)) mappedCount++;
-    }
-
-    const diffs = diffSse(baselineMap, overrideMap);
-    const rowsForClassification = diffs.map((d) => {
-      const residueKey = residueKeyToString({ chainId: d.chainId, labelSeqId: d.labelSeqId });
+    const rowsForClassification = mapping.diffs.map((d) => {
+      const residueKey = toResidueKey(d.chainId, d.labelSeqId);
       return {
         residue_key: residueKey,
-        display_residue: toDisplayResidueForTable(d.chainId, d.labelSeqId, residueKey, pushLog),
+        display_residue: toDisplayResidueForTable(
+          residueKey,
+          d.chainId,
+          d.labelSeqId,
+          residueDisplayLabelMapRef.current,
+          pushLog
+        ),
         baseline_label: d.molstar,
         override_label: d.wasm,
       };
@@ -498,8 +499,9 @@ export default function MolstarSseDiagViewer() {
     });
     pushLog('[SSE-Diag] diff rows generated:', {
       reason,
-      mappedCount,
+      mappedCount: mapping.stats.mapped_count,
       diffRows: rows.length,
+      mappingStats: mapping.stats,
       kindCounts: classified.stats.kindCounts,
       otherCount: classified.stats.otherCount,
       singletonCandidates: classified.stats.singletonCandidateCount,
@@ -537,18 +539,21 @@ export default function MolstarSseDiagViewer() {
 
       stage = 'override compute';
       const output = await ensureOverrideOutput();
-      const statusFromMapping = deriveComparisonStatus(baselineMapRef.current, output);
-      const reviewResult = computeReviewPointsMetric(baselineMapRef.current, output, pushLog);
+      const mapping =
+        baselineMapRef.current && output ? buildSseMappingResult(baselineMapRef.current, output.residues) : null;
+      const statusFromMapping = deriveComparisonStatus(baselineMapRef.current, output, mapping);
+      const reviewResult = computeReviewPointsMetric(mapping, pushLog);
       const nextStatus = reviewResult.didFail ? 'partial' : statusFromMapping;
       updateComparisonStatus(nextStatus);
       updateHudSummaryForOutput(
         baselineMapRef.current,
         output,
+        mapping,
         nextStatus,
         reviewResult.metric,
         'view_mode switch'
       );
-      updateDiffRows(baselineMapRef.current, output, 'view_mode switch');
+      updateDiffRows(mapping, 'view_mode switch');
 
       if (!output || output.residues.length === 0) {
         await restoreBaselineAndRebuild('override unavailable');
@@ -665,6 +670,7 @@ export default function MolstarSseDiagViewer() {
       pushLog('[SSE-Diag] extractResidueKeys()');
       const residueKeys = extractResidueKeys(plugin, pushLog);
       residueKeysRef.current = residueKeys;
+      residueDisplayLabelMapRef.current = extractResidueDisplayLabels(plugin, pushLog);
       pushLog('[SSE-Diag] residueKeys:', residueKeys.length);
 
       stage = 'override compute';
@@ -678,18 +684,23 @@ export default function MolstarSseDiagViewer() {
         pushLog('[SSE-Diag] override compute FAILED:', e instanceof Error ? (e.stack ?? e.message) : String(e));
       }
 
-      const statusFromMapping = overrideComputeFailed ? 'partial' : deriveComparisonStatus(molstarMap, output);
-      const reviewResult = computeReviewPointsMetric(molstarMap, output, pushLog);
+      const mapping =
+        !overrideComputeFailed && output ? buildSseMappingResult(molstarMap, output.residues) : null;
+      const statusFromMapping = overrideComputeFailed
+        ? 'partial'
+        : deriveComparisonStatus(molstarMap, output, mapping);
+      const reviewResult = computeReviewPointsMetric(mapping, pushLog);
       const nextStatus = reviewResult.didFail ? 'partial' : statusFromMapping;
       updateComparisonStatus(nextStatus);
       updateHudSummaryForOutput(
         molstarMap,
         output,
+        mapping,
         nextStatus,
         reviewResult.metric,
         'pipeline'
       );
-      updateDiffRows(molstarMap, output, 'pipeline');
+      updateDiffRows(mapping, 'pipeline');
 
       // quick stats
       pushLog('[SSE-Diag] molstarMap counts:', countLabelsFromMap(molstarMap));
@@ -885,9 +896,11 @@ export default function MolstarSseDiagViewer() {
           </div>
         </div>
 
+        <SseDiagPanel summary={hudSummary} />
+
         {fatal && (
           <pre style={{ whiteSpace: 'pre-wrap', color: '#b00', background: '#fee', padding: 8, marginTop: 10 }}>
-            {fatal}
+            {toUiMessage(fatal)}
           </pre>
         )}
 
@@ -990,17 +1003,74 @@ const tableSelectedRowStyle: CSSProperties = {
 const DASH = '—';
 
 function toDisplayResidueForTable(
+  residueKey: string,
   chainId: string,
   labelSeqId: number,
-  fallback: string,
-  log: LogFn
+  displayLabelMap: Map<string, string>,
+  fallbackLog: LogFn,
 ): string {
+  const fromMap = displayLabelMap.get(residueKey);
+  if (fromMap) return fromMap;
+
   if (chainId && Number.isFinite(labelSeqId)) {
+    fallbackLog('[SSE-Diag] display_residue fallback: name unavailable', { residueKey });
     return `${chainId}:${labelSeqId}`;
   }
 
-  log('[SSE-Diag] display_residue fallback:', { chainId, labelSeqId, fallback });
-  return fallback;
+  fallbackLog('[SSE-Diag] display_residue fallback: invalid key', { residueKey, chainId, labelSeqId });
+  return residueKey;
+}
+
+function toResidueKey(chainId: string, labelSeqId: number): string {
+  return `${chainId}:${labelSeqId}`;
+}
+
+function createExecutionRecord(stage: DiagnosisStage, note: string): ExecutionRecord {
+  const baselineReady = stage !== 'not_ready';
+  const overrideReady = stage === 'override_ready' || stage === 'comparison_ready';
+  const comparisonReady = stage === 'comparison_ready';
+  return {
+    diagnosis_stage: stage,
+    baseline_ready: baselineReady,
+    override_ready: overrideReady,
+    comparison_ready: comparisonReady,
+    updated_at: new Date().toISOString(),
+    note,
+  };
+}
+
+function summarizeDiagnosisStage(stage: DiagnosisStage): string {
+  if (stage === 'baseline_ready') return 'Baseline ready';
+  if (stage === 'override_ready') return 'Override ready';
+  if (stage === 'comparison_ready') return 'Comparison ready';
+  return 'Not ready';
+}
+
+function toDiagNote(
+  stage: DiagnosisStage,
+  output: SseEngineOutput | null,
+  mapping: SseMappingResult | null
+): string {
+  if (stage === 'comparison_ready') {
+    if (output?.metadata?.engine_name) {
+      return `${output.metadata.engine_name} applied`;
+    }
+    return `Comparison ready (${mapping?.diffs.length ?? 0} review points)`;
+  }
+  if (stage === 'override_ready') return 'Override ready';
+  if (stage === 'baseline_ready') return 'Baseline ready';
+  return 'Awaiting mmCIF load';
+}
+
+function deriveDiagnosisStage(
+  baselineMap: Map<string, SseLabel> | null,
+  output: SseEngineOutput | null,
+  mapping: SseMappingResult | null
+): DiagnosisStage {
+  if (!baselineMap || baselineMap.size === 0) return 'not_ready';
+  if (!output || output.residues.length === 0) return 'baseline_ready';
+  if (!mapping) return 'override_ready';
+  return 'comparison_ready';
 }
 
 function metricAvailable<T>(value: T): MetricValue<T> {
@@ -1032,6 +1102,15 @@ function createEmptyComparisonSummary(
       mapping_basis: 'Residue key exact match',
       engine_summary: DASH,
     },
+    contract_detail: {
+      baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
+      override_profile: DASH,
+      comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
+      chain_policy: 'All chains in current structure',
+      model_policy: 'Mol* current structure',
+      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
+    },
+    execution_record: createExecutionRecord('not_ready', 'Awaiting mmCIF load'),
   };
 }
 
@@ -1110,6 +1189,18 @@ function formatContractMappedRate(summary: SseComparisonSummary): string {
 
   return `Mapped ${summary.mapped_count.value} / Candidate ${summary.candidate_count.value} (${formatPercent(summary.mapped_rate.value)})`;
 }
+
+function formatInputProfile(summary: SseComparisonSummary): string {
+  const profile = summary.engine_metadata?.input_profile;
+  if (!profile) return DASH;
+  const entries = Object.entries(profile).map(([key, value]) => `${key}=${String(value)}`);
+  return entries.join(', ');
+}
+
+function toUiMessage(text: string): string {
+  return text.replace(/\berror\b/gi, 'notice').replace(/\bfailed\b/gi, 'incomplete');
+}
+
 
 function SseDiagHud({
   summary,
@@ -1269,6 +1360,50 @@ function SseDiagHud({
   );
 }
 
+function SseDiagPanel({ summary }: { summary: SseComparisonSummary }) {
+  const exec = summary.execution_record;
+  const stageText = summarizeDiagnosisStage(exec.diagnosis_stage);
+
+  return (
+    <div style={{ marginTop: 10, border: '1px solid #ddd', borderRadius: 8, overflow: 'hidden' }}>
+      <div
+        style={{
+          padding: '8px 10px',
+          borderBottom: '1px solid #eee',
+          fontSize: 12,
+          fontWeight: 700,
+          background: '#fafafa',
+        }}
+      >
+        Diag
+      </div>
+      <div style={{ padding: 10, fontSize: 12, display: 'grid', gap: 8 }}>
+        <div style={{ fontWeight: 600 }}>{stageText}</div>
+        <div style={{ color: '#333' }}>{exec.note}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 10px' }}>
+          <HudField label="Execution record" value={exec.updated_at ?? DASH} />
+          <HudField label="Baseline ready" value={exec.baseline_ready ? 'Yes' : 'No'} />
+          <HudField label="Override ready" value={exec.override_ready ? 'Yes' : 'No'} />
+          <HudField label="Comparison ready" value={exec.comparison_ready ? 'Yes' : 'No'} />
+          <HudField label="Engine stage" value={formatEngineStageForHud(summary)} />
+          <HudField label="Input profile" value={formatInputProfile(summary)} />
+        </div>
+        <details>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Contract detail</summary>
+          <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 10px' }}>
+            <HudField label="baseline_profile" value={summary.contract_detail.baseline_profile} />
+            <HudField label="override_profile" value={summary.contract_detail.override_profile} />
+            <HudField label="comparison_scope" value={summary.contract_detail.comparison_scope} />
+            <HudField label="chain_policy" value={summary.contract_detail.chain_policy} />
+            <HudField label="model_policy" value={summary.contract_detail.model_policy} />
+            <HudField label="mapping_basis" value={summary.contract_detail.mapping_basis} />
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 function HudField({ label, value }: { label: string; value: string }) {
   return (
     <>
@@ -1293,104 +1428,96 @@ function countLabelsFromOutput(output: SseEngineOutput) {
 function buildComparisonSummary({
   baselineMap,
   output,
+  mapping,
   comparisonStatus,
   viewMode,
   reviewPoints,
 }: {
   baselineMap: Map<string, SseLabel> | null;
   output: SseEngineOutput | null;
+  mapping: SseMappingResult | null;
   comparisonStatus: ComparisonStatus;
   viewMode: SseViewMode;
   reviewPoints: MetricValue<number>;
 }): SseComparisonSummary {
   const hasBaseline = baselineMap !== null;
   const hasOverride = !!output && output.residues.length > 0;
-  const candidateCount = baselineMap?.size ?? 0;
-  const overrideKeys = new Set<string>();
-
-  if (hasOverride && output) {
-    for (const r of output.residues) overrideKeys.add(residueKeyToString(r));
-  }
-
-  let mappedCount = 0;
-  if (baselineMap) {
-    for (const key of baselineMap.keys()) {
-      if (overrideKeys.has(key)) mappedCount++;
-    }
-  }
-
-  let overrideOnlyCount = 0;
-  if (baselineMap && output) {
-    for (const key of overrideKeys) {
-      if (!baselineMap.has(key)) overrideOnlyCount++;
-    }
-  }
-
-  const unmappedTotal = Math.max(candidateCount - mappedCount, 0) + overrideOnlyCount;
-  const mappedRate = candidateCount === 0 ? 0 : mappedCount / candidateCount;
-  const mappingAvailable = hasBaseline && hasOverride;
+  const mappingAvailable = hasBaseline && hasOverride && mapping !== null;
+  const stage = deriveDiagnosisStage(baselineMap, output, mapping);
+  const note = toDiagNote(stage, output, mapping);
 
   const engineSummary = output?.metadata
     ? `${output.metadata.engine_name} ${output.metadata.engine_version} (${formatEngineStage(output.metadata.engine_stage)})`
+    : DASH;
+
+  const overrideProfile = output?.metadata
+    ? `${output.metadata.engine_name} ${output.metadata.engine_version} / ${formatEngineStage(output.metadata.engine_stage)}`
     : DASH;
 
   return {
     comparison_status: comparisonStatus,
     view_mode: viewMode,
     engine_metadata: output?.metadata ?? null,
-    comparable_count: mappingAvailable ? metricAvailable(mappedCount) : metricUnavailable('mapping not available'),
-    candidate_count: hasBaseline ? metricAvailable(candidateCount) : metricUnavailable('baseline not available'),
-    mapped_count: mappingAvailable ? metricAvailable(mappedCount) : metricUnavailable('mapping not available'),
-    mapped_rate: mappingAvailable ? metricAvailable(mappedRate) : metricUnavailable('mapping not available'),
-    unmapped_total: mappingAvailable ? metricAvailable(unmappedTotal) : metricUnavailable('mapping not available'),
-    ambiguous_count: mappingAvailable ? metricAvailable(0) : metricUnavailable('mapping not available'),
+    comparable_count: mappingAvailable
+      ? metricAvailable(mapping.stats.mapped_count)
+      : metricUnavailable('mapping not available'),
+    candidate_count: hasBaseline
+      ? metricAvailable(mapping ? mapping.stats.candidate_count : baselineMap.size)
+      : metricUnavailable('baseline not available'),
+    mapped_count: mappingAvailable ? metricAvailable(mapping.stats.mapped_count) : metricUnavailable('mapping not available'),
+    mapped_rate: mappingAvailable ? metricAvailable(mapping.stats.mapped_rate) : metricUnavailable('mapping not available'),
+    unmapped_total: mappingAvailable
+      ? metricAvailable(mapping.stats.unmapped_total)
+      : metricUnavailable('mapping not available'),
+    ambiguous_count: mappingAvailable
+      ? metricAvailable(mapping.stats.ambiguous_count)
+      : metricUnavailable('mapping not available'),
     review_points_count: reviewPoints,
     contract_summary: {
       model_policy: 'Mol* current structure',
       residue_key_policy: 'label_asym_id + label_seq_id',
-      mapping_basis: 'Residue key exact match',
+      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
       engine_summary: comparisonStatus === 'baseline_only' ? DASH : engineSummary,
     },
+    contract_detail: {
+      baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
+      override_profile: comparisonStatus === 'baseline_only' ? DASH : overrideProfile,
+      comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
+      chain_policy: 'All chains in current structure',
+      model_policy: 'Mol* current structure',
+      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
+    },
+    execution_record: createExecutionRecord(stage, note),
   };
 }
 
 function computeReviewPointsMetric(
-  baselineMap: Map<string, SseLabel> | null,
-  output: SseEngineOutput | null,
+  mapping: SseMappingResult | null,
   log: LogFn
 ): { metric: MetricValue<number>; didFail: boolean } {
-  if (!baselineMap || !output || output.residues.length === 0) {
+  if (!mapping) {
     return { metric: metricUnavailable('diff not available'), didFail: false };
   }
 
   try {
-    const overrideMap = new Map<string, SseLabel>();
-    for (const r of output.residues) overrideMap.set(residueKeyToString(r), r.sse);
-
-    const candidateCount = baselineMap.size;
-    let mappedCount = 0;
-    for (const key of baselineMap.keys()) {
-      if (overrideMap.has(key)) mappedCount++;
-    }
-
-    let overrideOnlyCount = 0;
-    for (const key of overrideMap.keys()) {
-      if (!baselineMap.has(key)) overrideOnlyCount++;
-    }
-
-    if (mappedCount < candidateCount || overrideOnlyCount > 0) {
+    if (
+      mapping.stats.unmapped_baseline_only_count > 0 ||
+      mapping.stats.unmapped_override_only_count > 0 ||
+      mapping.stats.ambiguous_count > 0
+    ) {
       log('[SSE-Diag] review points unavailable: mapping incomplete', {
-        candidateCount,
-        mappedCount,
-        overrideOnlyCount,
+        candidateCount: mapping.stats.candidate_count,
+        mappedCount: mapping.stats.mapped_count,
+        unmappedBaselineOnly: mapping.stats.unmapped_baseline_only_count,
+        unmappedOverrideOnly: mapping.stats.unmapped_override_only_count,
+        ambiguousCount: mapping.stats.ambiguous_count,
       });
       return { metric: metricUnavailable('mapping incomplete'), didFail: false };
     }
 
-    const diffs = diffSse(baselineMap, overrideMap);
-    log('[SSE-Diag] diffs count:', diffs.length);
-    log('[SSE-Diag] diffs sample:', diffs.slice(0, 30));
-    return { metric: metricAvailable(diffs.length), didFail: false };
+    log('[SSE-Diag] diffs count:', mapping.diffs.length);
+    log('[SSE-Diag] diffs sample:', mapping.diffs.slice(0, 30));
+    return { metric: metricAvailable(mapping.diffs.length), didFail: false };
   } catch (e) {
     log('[SSE-Diag] review points unavailable:', e instanceof Error ? e.message : String(e));
     return { metric: metricUnavailable('diff failed'), didFail: true };
@@ -1399,21 +1526,15 @@ function computeReviewPointsMetric(
 
 function deriveComparisonStatus(
   baselineMap: Map<string, SseLabel> | null,
-  output: SseEngineOutput | null
+  output: SseEngineOutput | null,
+  mapping: SseMappingResult | null
 ): ComparisonStatus {
   if (!baselineMap || baselineMap.size === 0) return 'partial';
   if (!output || output.residues.length === 0) return 'baseline_only';
-
-  const overrideKeys = new Set<string>();
-  for (const r of output.residues) overrideKeys.add(residueKeyToString(r));
-
-  let mappedCount = 0;
-  for (const key of baselineMap.keys()) {
-    if (overrideKeys.has(key)) mappedCount++;
-  }
-
-  if (mappedCount < baselineMap.size) return 'partial';
-  if (overrideKeys.size > mappedCount) return 'partial';
+  if (!mapping) return 'partial';
+  if (mapping.stats.mapped_count < mapping.stats.candidate_count) return 'partial';
+  if (mapping.stats.unmapped_override_only_count > 0) return 'partial';
+  if (mapping.stats.ambiguous_count > 0) return 'partial';
 
   return 'full';
 }

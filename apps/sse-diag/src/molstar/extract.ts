@@ -139,3 +139,45 @@ export function extractResidueKeys(plugin: PluginContext, log?: LogFn): SseResid
 
   return out;
 }
+
+function resolveResidueName(residues: any, ri: number): string | undefined {
+  const raw =
+    (colValue(residues?.label_comp_id, ri) as string | undefined) ??
+    (colValue(residues?.auth_comp_id, ri) as string | undefined) ??
+    (colValue(residues?.comp_id, ri) as string | undefined);
+
+  if (!raw || typeof raw !== 'string') return void 0;
+  const trimmed = raw.trim().toUpperCase();
+  return trimmed.length > 0 ? trimmed : void 0;
+}
+
+export function extractResidueDisplayLabels(plugin: PluginContext, log?: LogFn): Map<string, string> {
+  const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
+  const structures = hierarchy?.structures ?? [];
+  const structure = structures?.[0]?.cell?.obj?.data;
+  const out = new Map<string, string>();
+
+  if (!structure) {
+    log?.('[SSE-Diag] extractResidueDisplayLabels: no structure');
+    return out;
+  }
+
+  const unit0: any = (structure as any).units?.[0];
+  const model: any = unit0?.model ?? (structure as any).models?.[0] ?? (structure as any).model;
+  const residues: any = model?.atomicHierarchy?.residues;
+  const n: number = residues?._rowCount ?? 0;
+
+  for (let ri = 0; ri < n; ri++) {
+    const chainId = resolveChainId(model, ri);
+    const labelSeqId = resolveSeqId(residues, ri);
+    if (!chainId || labelSeqId == null) continue;
+
+    const residueName = resolveResidueName(residues, ri);
+    const key = residueKeyToString({ chainId, labelSeqId });
+    const label = residueName ? `${chainId}:${residueName}${labelSeqId}` : `${chainId}:${labelSeqId}`;
+    if (!out.has(key)) out.set(key, label);
+  }
+
+  log?.('[SSE-Diag] extractResidueDisplayLabels result:', out.size);
+  return out;
+}

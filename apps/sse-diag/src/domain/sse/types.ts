@@ -16,6 +16,7 @@ export type SseEngineMetadata = {
   engine_version: string;
   engine_stage: SseEngineStage;
   engine_input_schema_version: string;
+  input_profile?: Record<string, string | number | boolean | null>;
   engine_params?: Record<string, string | number | boolean | null>;
   computed_at?: string;
 };
@@ -25,6 +26,26 @@ export type ComparisonContractSummary = {
   residue_key_policy: string;
   mapping_basis: string;
   engine_summary: string;
+};
+
+export type ComparisonContractDetail = {
+  baseline_profile: string;
+  override_profile: string;
+  comparison_scope: string;
+  chain_policy: string;
+  model_policy: string;
+  mapping_basis: string;
+};
+
+export type DiagnosisStage = 'not_ready' | 'baseline_ready' | 'override_ready' | 'comparison_ready';
+
+export type ExecutionRecord = {
+  diagnosis_stage: DiagnosisStage;
+  baseline_ready: boolean;
+  override_ready: boolean;
+  comparison_ready: boolean;
+  updated_at: string | null;
+  note: string;
 };
 
 export type DiffKind =
@@ -66,6 +87,8 @@ export type SseComparisonSummary = {
   ambiguous_count: MetricValue<number>;
   review_points_count: MetricValue<number>;
   contract_summary: ComparisonContractSummary;
+  contract_detail: ComparisonContractDetail;
+  execution_record: ExecutionRecord;
 };
 
 export type ResidueKey = {

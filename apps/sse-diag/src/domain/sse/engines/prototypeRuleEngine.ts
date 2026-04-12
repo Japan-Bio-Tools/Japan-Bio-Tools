@@ -32,6 +32,11 @@ export class PrototypeRuleEngine {
         engine_version: '0.1.0',
         engine_stage: 'prototype',
         engine_input_schema_version: 'sse-engine-input/v1',
+        input_profile: {
+          source: 'molstar_residue_keys',
+          residue_count: residues.length,
+          residue_key_policy: 'label_asym_id + label_seq_id',
+        },
         engine_params: {
           rangeLo: this.rangeLo,
           rangeHi: this.rangeHi,
