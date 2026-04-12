@@ -24,15 +24,13 @@ import { extractResidueDisplayLabels, extractResidueKeys } from '../molstar/extr
 import { getMolstarStandardSse } from '../molstar/standardSse';
 import { rebuildCartoonOnly, forceSecondaryStructureColorTheme } from '../molstar/state';
 
-import {
-  createSseEngineRegistry,
-  resolveSseEngineDescriptor,
-  type EngineResolutionResult,
-  type SseEngineFactoryParams,
-} from '../domain/sse/engine';
+import { createSseEngineRegistry } from '../domain/sse/engine';
 import { DEFAULT_SSE_ENGINE_KEY, SSE_ENGINE_DESCRIPTORS } from '../domain/sse/engines/registry';
-import { buildSseMappingResult, type SseMappingResult } from '../domain/sse/compare';
-import { classifyDiffRows } from '../domain/sse/classifyDiff';
+import { runDiagnosisPipeline } from '../application/diagnosis/runDiagnosisPipeline';
+import type {
+  DiagnosisContractContext,
+  RunDiagnosisPipelineResult,
+} from '../application/diagnosis/types';
 import {
   applyOverrideSseToMolstarModel,
   captureBaselineSecondaryStructureSnapshot,
@@ -43,28 +41,16 @@ import { clearDiffSelectionMarks, focusAndHighlightResidueByKey } from '../molst
 
 type LogFn = (msg: string, data?: unknown) => void;
 
-/**
- * Lightweight cache of the latest successful override output for identical run inputs.
- * This is an optimization only; it must not become comparison truth.
- */
-type OverrideOutputCache = {
-  requestedEngineKey: string | null;
-  resolvedEngineId: string;
-  rangeLo: number;
-  rangeHi: number;
-  residueCount: number;
-  output: SseEngineOutput;
-};
-
-/** Internal execution result used by orchestration flow control. */
-type OverrideComputeResult = {
-  output: SseEngineOutput | null;
-  didFail: boolean;
-  staleDiscarded: boolean;
-  executionRecord: EngineExecutionRecord | null;
-};
-
 type DiffKindFilter = 'all' | DiffKind;
+
+const DIAGNOSIS_CONTRACT_CONTEXT: DiagnosisContractContext = {
+  baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
+  comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
+  chain_policy: 'All chains in current structure',
+  model_policy: 'Mol* current structure',
+  residue_key_policy: 'label_asym_id + label_seq_id',
+  mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
+};
 
 export default function MolstarSseDiagViewer() {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +82,6 @@ export default function MolstarSseDiagViewer() {
   const baselineMapRef = useRef<Map<string, SseLabel> | null>(null);
   const residueKeysRef = useRef<SseResidueKey[]>([]);
   const residueDisplayLabelMapRef = useRef<Map<string, string>>(new Map());
-  const overrideOutputCacheRef = useRef<OverrideOutputCache | null>(null);
   const nextRunIdRef = useRef(0);
   // Latest started run id; only this run may update current execution summary or visible comparison state.
   const latestRunIdRef = useRef<string | null>(null);
@@ -150,17 +135,22 @@ export default function MolstarSseDiagViewer() {
   );
 
   const selectedDiffRow =
-    selectedDiffIndex !== null && selectedDiffIndex >= 0 && selectedDiffIndex < filteredDiffRows.length
-      ? filteredDiffRows[selectedDiffIndex]
+    selectedDiffIndex !== null && selectedDiffIndex >= 0 && selectedDiffIndex < diffRows.length
+      ? diffRows[selectedDiffIndex]
       : null;
-  const currentDiffIndexText = formatCurrentDiffIndex(selectedDiffIndex, filteredDiffRows.length);
+  const selectedVisibleDiffIndex =
+    selectedDiffRow === null
+      ? -1
+      : filteredDiffRows.findIndex((row) => row.residue_key === selectedDiffRow.residue_key);
+  const currentDiffIndexText = formatCurrentDiffIndex(selectedDiffIndex, diffRows.length);
+  const hasVisibleSelection = selectedVisibleDiffIndex >= 0;
 
   const prevDisabled =
     filteredDiffRows.length === 0 ||
-    (selectedDiffIndex !== null && selectedDiffIndex <= 0);
+    (hasVisibleSelection && selectedVisibleDiffIndex <= 0);
   const nextDisabled =
     filteredDiffRows.length === 0 ||
-    (selectedDiffIndex !== null && selectedDiffIndex >= filteredDiffRows.length - 1);
+    (hasVisibleSelection && selectedVisibleDiffIndex >= filteredDiffRows.length - 1);
 
   // --- Selection and HUD trace logs ---
   useEffect(() => {
@@ -256,26 +246,6 @@ export default function MolstarSseDiagViewer() {
     if (!chainFilterOptions.includes(chainFilter)) setChainFilter('all');
   }, [chainFilter, chainFilterOptions]);
 
-  // Keep row selection stable when filter changes reshuffle visible table indexes.
-  useEffect(() => {
-    const currentResidueKey = selectedResidueKeyRef.current;
-    if (currentResidueKey) {
-      const nextIndex = filteredDiffRows.findIndex((row) => row.residue_key === currentResidueKey);
-      if (nextIndex >= 0) {
-        if (selectedDiffIndexRef.current !== nextIndex) {
-          selectedDiffIndexRef.current = nextIndex;
-          setSelectedDiffIndex(nextIndex);
-        }
-        return;
-      }
-    }
-
-    if (selectedDiffIndexRef.current !== null || currentResidueKey !== null) {
-      applySelectionState(null, filteredDiffRows, 'table filter refresh', { focus: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredDiffRows]);
-
   function isCurrentRun(runId: string): boolean {
     return latestRunIdRef.current === runId;
   }
@@ -308,28 +278,6 @@ export default function MolstarSseDiagViewer() {
   function nextRunId(): string {
     nextRunIdRef.current += 1;
     return `run-${nextRunIdRef.current}`;
-  }
-
-  function createRunningEngineExecutionRecord(
-    runId: string,
-    resolution: EngineResolutionResult,
-    effectiveParams: Record<string, string | number | boolean | null>
-  ): EngineExecutionRecord {
-    const startedAt = new Date().toISOString();
-    return {
-      run_id: runId,
-      requested_engine_key: resolution.requested_engine_key,
-      resolved_engine_id: resolution.resolved_engine_id,
-      resolution_mode: resolution.resolution_mode,
-      status: 'running',
-      error: null,
-      started_at: startedAt,
-      finished_at: null,
-      engine_name: resolution.descriptor?.engine_name ?? null,
-      engine_version: null,
-      engine_stage: resolution.descriptor?.engine_stage ?? null,
-      effective_params: effectiveParams,
-    };
   }
 
   // Central selection sync for table, HUD current row, and Mol* focus/highlight actions.
@@ -406,55 +354,87 @@ export default function MolstarSseDiagViewer() {
   }
 
   function onDiffRowClick(index: number) {
-    applySelectionState(index, filteredDiffRows, 'table row click', { focus: true, logSelectionEvent: true });
+    const row = filteredDiffRows[index];
+    if (!row) return;
+    const canonicalIndex = diffRows.findIndex((entry) => entry.residue_key === row.residue_key);
+    applySelectionState(canonicalIndex >= 0 ? canonicalIndex : null, diffRows, 'table row click', {
+      focus: true,
+      logSelectionEvent: true,
+    });
   }
 
   function onPrevDiff() {
     pushLog('[SSE-Diag] Prev invoked:', {
-      selected: selectedDiffIndexRef.current,
+      selected_index: selectedDiffIndexRef.current,
+      selected_residue_key: selectedResidueKeyRef.current,
       total: filteredDiffRows.length,
       total_unfiltered: diffRows.length,
     });
     if (filteredDiffRows.length === 0) return;
 
-    const current = selectedDiffIndexRef.current;
-    if (current === null) {
-      pushLog('[SSE-Diag] no selection fallback:', { action: 'prev', fallbackIndex: 0 });
+    const currentVisibleIndex =
+      selectedResidueKeyRef.current === null
+        ? -1
+        : filteredDiffRows.findIndex((row) => row.residue_key === selectedResidueKeyRef.current);
+    if (currentVisibleIndex < 0) {
+      pushLog('[SSE-Diag] no visible selection fallback:', { action: 'prev', fallbackVisibleIndex: 0 });
     }
-    const nextIndex = current === null ? 0 : Math.max(0, current - 1);
-    if (current !== null && nextIndex === current) {
-      pushLog('[SSE-Diag] Prev boundary reached:', { index: current });
+    const nextVisibleIndex = currentVisibleIndex < 0 ? 0 : Math.max(0, currentVisibleIndex - 1);
+    if (currentVisibleIndex >= 0 && nextVisibleIndex === currentVisibleIndex) {
+      pushLog('[SSE-Diag] Prev boundary reached:', { visible_index: currentVisibleIndex });
     }
-    applySelectionState(nextIndex, filteredDiffRows, 'prev', { focus: true });
+    const nextRow = filteredDiffRows[nextVisibleIndex];
+    const nextIndex =
+      nextRow === undefined
+        ? null
+        : diffRows.findIndex((row) => row.residue_key === nextRow.residue_key);
+    applySelectionState(
+      nextIndex !== null && nextIndex >= 0 ? nextIndex : null,
+      diffRows,
+      'prev',
+      { focus: true }
+    );
   }
 
   function onNextDiff() {
     pushLog('[SSE-Diag] Next invoked:', {
-      selected: selectedDiffIndexRef.current,
+      selected_index: selectedDiffIndexRef.current,
+      selected_residue_key: selectedResidueKeyRef.current,
       total: filteredDiffRows.length,
       total_unfiltered: diffRows.length,
     });
     if (filteredDiffRows.length === 0) return;
 
-    const current = selectedDiffIndexRef.current;
-    if (current === null) {
-      pushLog('[SSE-Diag] no selection fallback:', { action: 'next', fallbackIndex: 0 });
+    const currentVisibleIndex =
+      selectedResidueKeyRef.current === null
+        ? -1
+        : filteredDiffRows.findIndex((row) => row.residue_key === selectedResidueKeyRef.current);
+    if (currentVisibleIndex < 0) {
+      pushLog('[SSE-Diag] no visible selection fallback:', { action: 'next', fallbackVisibleIndex: 0 });
     }
-    const nextIndex = current === null ? 0 : Math.min(filteredDiffRows.length - 1, current + 1);
-    if (current !== null && nextIndex === current) {
-      pushLog('[SSE-Diag] Next boundary reached:', { index: current });
+    const nextVisibleIndex =
+      currentVisibleIndex < 0 ? 0 : Math.min(filteredDiffRows.length - 1, currentVisibleIndex + 1);
+    if (currentVisibleIndex >= 0 && nextVisibleIndex === currentVisibleIndex) {
+      pushLog('[SSE-Diag] Next boundary reached:', { visible_index: currentVisibleIndex });
     }
-    applySelectionState(nextIndex, filteredDiffRows, 'next', { focus: true });
+    const nextRow = filteredDiffRows[nextVisibleIndex];
+    const nextIndex =
+      nextRow === undefined
+        ? null
+        : diffRows.findIndex((row) => row.residue_key === nextRow.residue_key);
+    applySelectionState(
+      nextIndex !== null && nextIndex >= 0 ? nextIndex : null,
+      diffRows,
+      'next',
+      { focus: true }
+    );
   }
 
   useEffect(() => {
-    if (selectedDiffIndex === null) return;
-    const row = filteredDiffRows[selectedDiffIndex];
-    if (!row) return;
-
-    const rowEl = diffRowRefMap.current.get(row.residue_key);
+    if (!selectedDiffRow) return;
+    const rowEl = diffRowRefMap.current.get(selectedDiffRow.residue_key);
     rowEl?.scrollIntoView({ block: 'nearest' });
-  }, [filteredDiffRows, selectedDiffIndex]);
+  }, [selectedDiffRow?.residue_key]);
 
   function updateViewMode(next: SseViewMode) {
     const prev = viewModeRef.current;
@@ -493,7 +473,6 @@ export default function MolstarSseDiagViewer() {
     baselineMapRef.current = null;
     residueKeysRef.current = [];
     residueDisplayLabelMapRef.current = new Map();
-    overrideOutputCacheRef.current = null;
     latestRunIdRef.current = null;
     setDiffRows([]);
     setKindFilter('all');
@@ -506,180 +485,106 @@ export default function MolstarSseDiagViewer() {
     pushLog('[SSE-Diag] analysis cache reset:', { reason });
   }
 
-  /**
-   * Resolves and executes current requested engine parameters.
-   * Stale runs are recorded in history but excluded from active comparison state updates.
-   */
-  async function ensureOverrideOutput(trigger: string): Promise<OverrideComputeResult> {
-    const residueKeys = residueKeysRef.current;
-    if (residueKeys.length === 0) {
-      pushLog('[SSE-Diag] override compute skipped: no residue keys');
-      return { output: null, didFail: false, staleDiscarded: false, executionRecord: null };
+  function markRecordDiscardedAsStale(
+    record: EngineExecutionRecord,
+    reason: string
+  ): EngineExecutionRecord {
+    return {
+      ...record,
+      status: 'discarded_stale',
+      error: record.error ?? reason,
+      finished_at: record.finished_at ?? new Date().toISOString(),
+    };
+  }
+
+  async function runDiagnosisForCurrentBaseline(
+    trigger: string,
+    viewModeForSummary: SseViewMode
+  ): Promise<RunDiagnosisPipelineResult | null> {
+    const baselineMap = baselineMapRef.current;
+    if (!baselineMap) {
+      pushLog('[SSE-Diag] diagnosis pipeline skipped: baseline unavailable', { trigger });
+      return null;
     }
 
-    // Minimal current parameter bag (interpreted by the resolved engine implementation).
-    const effectiveParams: Record<string, string | number | boolean | null> = {
-      rangeLo,
-      rangeHi,
-    };
-    const resolution = resolveSseEngineDescriptor(engineRegistry, requestedEngineKey, DEFAULT_SSE_ENGINE_KEY);
+    const residueKeys = residueKeysRef.current;
     const runId = nextRunId();
     latestRunIdRef.current = runId;
 
-    const record = createRunningEngineExecutionRecord(runId, resolution, effectiveParams);
-    upsertEngineExecutionRecord(record);
-
-    if (!resolution.descriptor || !resolution.resolved_engine_id) {
-      const failedResolution: EngineExecutionRecord = {
-        ...record,
-        status: 'failed_resolution',
-        error: resolution.error ?? 'engine resolution failed',
-        finished_at: new Date().toISOString(),
-      };
-      upsertEngineExecutionRecord(failedResolution);
-      pushLog('[SSE-Diag] engine resolution failed:', {
-        trigger,
-        run_id: runId,
-        requested_engine_key: resolution.requested_engine_key,
-        resolution_mode: resolution.resolution_mode,
-        error: failedResolution.error,
-      });
-      return { output: null, didFail: true, staleDiscarded: false, executionRecord: failedResolution };
-    }
-
-    const cached = overrideOutputCacheRef.current;
-    if (
-      cached &&
-      cached.requestedEngineKey === resolution.requested_engine_key &&
-      cached.resolvedEngineId === resolution.resolved_engine_id &&
-      cached.rangeLo === rangeLo &&
-      cached.rangeHi === rangeHi &&
-      cached.residueCount === residueKeys.length
-    ) {
-      const cachedCompleted: EngineExecutionRecord = {
-        ...record,
-        status: 'completed',
-        finished_at: new Date().toISOString(),
-        engine_name: cached.output.metadata?.engine_name ?? resolution.descriptor.engine_name,
-        engine_version: cached.output.metadata?.engine_version ?? null,
-        engine_stage: cached.output.metadata?.engine_stage ?? resolution.descriptor.engine_stage,
-        effective_params: cached.output.metadata?.effective_params ?? effectiveParams,
-      };
-      upsertEngineExecutionRecord(cachedCompleted);
-      pushLog('[SSE-Diag] override cache hit:', {
-        trigger,
-        run_id: runId,
-        requested_engine_key: resolution.requested_engine_key,
-        resolved_engine_id: resolution.resolved_engine_id,
-        residues: cached.output.residues.length,
-      });
-      return {
-        output: cached.output,
-        didFail: false,
-        staleDiscarded: false,
-        executionRecord: cachedCompleted,
-      };
-    }
-
-    pushLog('[SSE-Diag] override compute start:', {
+    pushLog('[SSE-Diag] diagnosis pipeline start:', {
       trigger,
       run_id: runId,
-      requested_engine_key: resolution.requested_engine_key,
-      resolved_engine_id: resolution.resolved_engine_id,
-      resolution_mode: resolution.resolution_mode,
+      requested_engine_key: requestedEngineKey,
       rangeLo,
       rangeHi,
       residues: residueKeys.length,
     });
 
-    try {
-      const engine = resolution.descriptor.create(effectiveParams as SseEngineFactoryParams);
-      const output = await engine.compute({ residues: residueKeys });
+    const result = await runDiagnosisPipeline({
+      run_id: runId,
+      requested_engine_key: requestedEngineKey,
+      default_engine_key: DEFAULT_SSE_ENGINE_KEY,
+      engine_registry: engineRegistry,
+      engine_params: { rangeLo, rangeHi },
+      baseline_map: baselineMap,
+      residue_keys: residueKeys,
+      residue_display_labels: residueDisplayLabelMapRef.current,
+      contract_context: DIAGNOSIS_CONTRACT_CONTEXT,
+      view_mode: viewModeForSummary,
+      is_run_current: isCurrentRun,
+    });
 
-      if (!isCurrentRun(runId)) {
-        const staleRecord: EngineExecutionRecord = {
-          ...record,
-          status: 'discarded_stale',
-          error: 'stale result discarded',
-          finished_at: new Date().toISOString(),
-          engine_name: output.metadata?.engine_name ?? resolution.descriptor.engine_name,
-          engine_version: output.metadata?.engine_version ?? null,
-          engine_stage: output.metadata?.engine_stage ?? resolution.descriptor.engine_stage,
-          effective_params: output.metadata?.effective_params ?? effectiveParams,
-        };
-        upsertEngineExecutionRecord(staleRecord);
-        pushLog('[SSE-Diag] stale result discarded:', {
-          trigger,
-          run_id: runId,
-          latest_run_id: latestRunIdRef.current,
-          resolved_engine_id: resolution.resolved_engine_id,
-        });
-        return { output: null, didFail: false, staleDiscarded: true, executionRecord: staleRecord };
-      }
+    upsertEngineExecutionRecord(result.engine_execution_record);
 
-      overrideOutputCacheRef.current = {
-        requestedEngineKey: resolution.requested_engine_key,
-        resolvedEngineId: resolution.resolved_engine_id,
-        rangeLo,
-        rangeHi,
-        residueCount: residueKeys.length,
-        output,
-      };
-
-      const completedRecord: EngineExecutionRecord = {
-        ...record,
-        status: 'completed',
-        finished_at: new Date().toISOString(),
-        engine_name: output.metadata?.engine_name ?? resolution.descriptor.engine_name,
-        engine_version: output.metadata?.engine_version ?? null,
-        engine_stage: output.metadata?.engine_stage ?? resolution.descriptor.engine_stage,
-        effective_params: output.metadata?.effective_params ?? effectiveParams,
-      };
-      upsertEngineExecutionRecord(completedRecord);
-      pushLog('[SSE-Diag] override cache updated:', {
+    if (result.stale_disposition === 'stale_candidate') {
+      const discardedRecord = markRecordDiscardedAsStale(
+        result.engine_execution_record,
+        'stale result discarded'
+      );
+      upsertEngineExecutionRecord(discardedRecord, { updateCurrentSummary: false });
+      pushLog('[SSE-Diag] stale result discarded by shell:', {
         trigger,
-        run_id: runId,
-        requested_engine_key: resolution.requested_engine_key,
-        resolved_engine_id: resolution.resolved_engine_id,
-        residues: output.residues.length,
-        rangeLo,
-        rangeHi,
+        run_id: result.run_id,
+        latest_run_id: latestRunIdRef.current,
       });
-      return { output, didFail: false, staleDiscarded: false, executionRecord: completedRecord };
-    } catch (e) {
-      const message = e instanceof Error ? (e.stack ?? e.message) : String(e);
-      if (!isCurrentRun(runId)) {
-        const staleFailedRecord: EngineExecutionRecord = {
-          ...record,
-          status: 'discarded_stale',
-          error: message,
-          finished_at: new Date().toISOString(),
-        };
-        upsertEngineExecutionRecord(staleFailedRecord);
-        pushLog('[SSE-Diag] stale failed result discarded:', {
-          trigger,
-          run_id: runId,
-          latest_run_id: latestRunIdRef.current,
-        });
-        return { output: null, didFail: false, staleDiscarded: true, executionRecord: staleFailedRecord };
-      }
-
-      const failedExecutionRecord: EngineExecutionRecord = {
-        ...record,
-        status: 'failed_execution',
-        error: message,
-        finished_at: new Date().toISOString(),
-      };
-      upsertEngineExecutionRecord(failedExecutionRecord);
-      pushLog('[SSE-Diag] override compute failed:', {
-        trigger,
-        run_id: runId,
-        requested_engine_key: resolution.requested_engine_key,
-        resolved_engine_id: resolution.resolved_engine_id,
-        error: message,
-      });
-      return { output: null, didFail: true, staleDiscarded: false, executionRecord: failedExecutionRecord };
+      return null;
     }
+
+    pushLog('[SSE-Diag] diagnosis pipeline done:', {
+      trigger,
+      run_id: result.run_id,
+      status: result.comparison_status,
+      failed: result.failed,
+      diff_rows: result.diff_rows.length,
+    });
+    return result;
+  }
+
+  function adoptDiagnosisRun(result: RunDiagnosisPipelineResult, reason: string) {
+    updateComparisonStatus(result.comparison_status);
+    updateHudSummary(result.comparison_summary, reason);
+    setDiffRows(result.diff_rows);
+
+    const selectedResidueKey = selectedResidueKeyRef.current;
+    const nextSelectedIndex =
+      selectedResidueKey === null
+        ? -1
+        : result.diff_rows.findIndex((row) => row.residue_key === selectedResidueKey);
+
+    applySelectionState(
+      nextSelectedIndex >= 0 ? nextSelectedIndex : null,
+      result.diff_rows,
+      `${reason}: adopt run`,
+      { focus: false }
+    );
+
+    pushLog('[SSE-Diag] diagnosis run adopted:', {
+      reason,
+      run_id: result.run_id,
+      comparison_status: result.comparison_status,
+      diff_rows: result.diff_rows.length,
+      selected_residue_key: selectedResidueKeyRef.current,
+    });
   }
 
   async function rebuildForStage(stage: string) {
@@ -729,93 +634,6 @@ export default function MolstarSseDiagViewer() {
     }
   }
 
-  // Rebuilds contract/metrics summary after pipeline or view-mode execution path.
-  function updateHudSummaryForOutput(
-    baselineMap: Map<string, SseLabel> | null,
-    output: SseEngineOutput | null,
-    mapping: SseMappingResult | null,
-    engineExecutionRecord: EngineExecutionRecord | null,
-    nextStatus: ComparisonStatus,
-    reviewPoints: MetricValue<number>,
-    reason: string
-  ) {
-    updateHudSummary(
-      buildComparisonSummary({
-        baselineMap,
-        output,
-        mapping,
-        engineExecutionRecord,
-        comparisonStatus: nextStatus,
-        viewMode: viewModeRef.current,
-        reviewPoints,
-      }),
-      reason
-    );
-  }
-
-  // Generates mapped-only diff review rows and applies active table filters.
-  function updateDiffRows(
-    mapping: SseMappingResult | null,
-    reason: string
-  ) {
-    if (!mapping) {
-      setDiffRows([]);
-      applySelectionState(null, [], `${reason}: no diff rows`, { focus: false });
-      pushLog('[SSE-Diag] diff rows skipped:', {
-        reason,
-        hasMapping: false,
-      });
-      return;
-    }
-
-    const rowsForClassification = mapping.diffs.map((d) => {
-      const residueKey = toResidueKey(d.chainId, d.labelSeqId);
-      return {
-        residue_key: residueKey,
-        display_residue: toDisplayResidueForTable(
-          residueKey,
-          d.chainId,
-          d.labelSeqId,
-          residueDisplayLabelMapRef.current,
-          pushLog
-        ),
-        baseline_label: d.molstar,
-        override_label: d.wasm,
-      };
-    });
-
-    const classified = classifyDiffRows(rowsForClassification);
-    const rows: DiffRow[] = classified.rows;
-    const filteredRows = filterDiffRows(rows, kindFilter, chainFilter);
-    const nextSelectedIndex =
-      selectedResidueKeyRef.current !== null
-        ? filteredRows.findIndex((row) => row.residue_key === selectedResidueKeyRef.current)
-        : -1;
-
-    setDiffRows(rows);
-    applySelectionState(nextSelectedIndex >= 0 ? nextSelectedIndex : null, filteredRows, `${reason}: rows refreshed`, {
-      focus: false,
-    });
-    pushLog('[SSE-Diag] diff rows generated:', {
-      reason,
-      mappedCount: mapping.stats.mapped_count,
-      diffRows: rows.length,
-      filteredRows: filteredRows.length,
-      mappingStats: mapping.stats,
-      kindCounts: classified.stats.kindCounts,
-      otherCount: classified.stats.otherCount,
-      singletonCandidates: classified.stats.singletonCandidateCount,
-      boundaryShiftCandidates: classified.stats.boundaryShiftCandidateCount,
-    });
-    pushLog('[SSE-Diag] table data updated:', {
-      reason,
-      totalRows: rows.length,
-      visibleRows: filteredRows.length,
-      kindFilter,
-      chainFilter,
-    });
-  }
-
   async function switchViewMode(nextMode: SseViewMode) {
     const plugin = pluginRef.current;
     pushLog('[SSE-Diag] view_mode switch requested:', {
@@ -841,39 +659,18 @@ export default function MolstarSseDiagViewer() {
       }
 
       stage = 'override compute';
-      const computeResult = await ensureOverrideOutput('view_mode switch');
-      if (computeResult.staleDiscarded) return;
-      const output = computeResult.output;
-      const overrideComputeFailed = computeResult.didFail;
-      const mapping =
-        !overrideComputeFailed && baselineMapRef.current && output
-          ? buildSseMappingResult(baselineMapRef.current, output.residues)
-          : null;
-      const statusFromMapping = overrideComputeFailed
-        ? 'partial'
-        : deriveComparisonStatus(baselineMapRef.current, output, mapping);
-      const reviewResult = computeReviewPointsMetric(mapping, pushLog);
-      const nextStatus = reviewResult.didFail ? 'partial' : statusFromMapping;
-      updateComparisonStatus(nextStatus);
-      updateHudSummaryForOutput(
-        baselineMapRef.current,
-        output,
-        mapping,
-        computeResult.executionRecord ?? hudSummary.engine_execution_record,
-        nextStatus,
-        reviewResult.metric,
-        'view_mode switch'
-      );
-      updateDiffRows(mapping, 'view_mode switch');
+      const result = await runDiagnosisForCurrentBaseline('view_mode switch', nextMode);
+      if (!result) return;
+      adoptDiagnosisRun(result, 'view_mode switch');
 
-      if (!output || output.residues.length === 0) {
+      if (!result.output || result.output.residues.length === 0 || result.failed) {
         await restoreBaselineAndRebuild('override unavailable');
         pushLog('[SSE-Diag] view_mode fixed to baseline: override unavailable');
         return;
       }
 
       stage = 'override apply';
-      await applyOverrideAndRebuild(output, 'view_mode switch');
+      await applyOverrideAndRebuild(result.output, 'view_mode switch');
       pushLog('[SSE-Diag] view_mode switch done:', {
         view_mode: viewModeRef.current,
         comparison_status: comparisonStatusRef.current,
@@ -985,41 +782,24 @@ export default function MolstarSseDiagViewer() {
       pushLog('[SSE-Diag] residueKeys:', residueKeys.length);
 
       stage = 'override compute';
-      let output: SseEngineOutput | null = null;
-      let overrideComputeFailed = false;
-      const computeResult = await ensureOverrideOutput('pipeline');
-      if (computeResult.staleDiscarded) return;
-      output = computeResult.output;
-      overrideComputeFailed = computeResult.didFail;
-
-      const mapping =
-        !overrideComputeFailed && output ? buildSseMappingResult(molstarMap, output.residues) : null;
-      const statusFromMapping = overrideComputeFailed
-        ? 'partial'
-        : deriveComparisonStatus(molstarMap, output, mapping);
-      const reviewResult = computeReviewPointsMetric(mapping, pushLog);
-      const nextStatus = reviewResult.didFail ? 'partial' : statusFromMapping;
-      updateComparisonStatus(nextStatus);
-      updateHudSummaryForOutput(
-        molstarMap,
-        output,
-        mapping,
-        computeResult.executionRecord ?? hudSummary.engine_execution_record,
-        nextStatus,
-        reviewResult.metric,
-        'pipeline'
-      );
-      updateDiffRows(mapping, 'pipeline');
+      const result = await runDiagnosisForCurrentBaseline('pipeline', requestedViewMode);
+      if (!result) return;
+      adoptDiagnosisRun(result, 'pipeline');
 
       // quick stats
       pushLog('[SSE-Diag] molstarMap counts:', countLabelsFromMap(molstarMap));
-      if (output) {
-        pushLog('[SSE-Diag] output counts:', countLabelsFromOutput(output));
+      if (result.output) {
+        pushLog('[SSE-Diag] output counts:', countLabelsFromOutput(result.output));
       }
 
-      if (requestedViewMode === 'override' && output && output.residues.length > 0) {
+      if (
+        requestedViewMode === 'override' &&
+        result.output &&
+        result.output.residues.length > 0 &&
+        !result.failed
+      ) {
         stage = 'override apply';
-        await applyOverrideAndRebuild(output, 'load');
+        await applyOverrideAndRebuild(result.output, 'load');
       } else {
         stage = 'baseline restore';
         if (requestedViewMode === 'override') {
@@ -1120,7 +900,6 @@ export default function MolstarSseDiagViewer() {
           onChange={(e) => {
             const next = e.target.value.trim();
             setRequestedEngineKey(next.length > 0 ? next : null);
-            overrideOutputCacheRef.current = null;
             pushLog('[SSE-Diag] requested_engine_key updated:', {
               requested_engine_key: next.length > 0 ? next : null,
             });
@@ -1241,7 +1020,7 @@ export default function MolstarSseDiagViewer() {
                   </tr>
                 ) : (
                   filteredDiffRows.map((row, index) => {
-                    const selected = selectedDiffIndex === index;
+                    const selected = selectedDiffRow?.residue_key === row.residue_key;
                     return (
                     <tr
                       key={row.residue_key}
@@ -1373,29 +1152,6 @@ const tableSelectedRowStyle: CSSProperties = {
 
 const DASH = '—';
 
-function toDisplayResidueForTable(
-  residueKey: string,
-  chainId: string,
-  labelSeqId: number,
-  displayLabelMap: Map<string, string>,
-  fallbackLog: LogFn,
-): string {
-  const fromMap = displayLabelMap.get(residueKey);
-  if (fromMap) return fromMap;
-
-  if (chainId && Number.isFinite(labelSeqId)) {
-    fallbackLog('[SSE-Diag] display_residue fallback: name unavailable', { residueKey });
-    return `${chainId}:${labelSeqId}`;
-  }
-
-  fallbackLog('[SSE-Diag] display_residue fallback: invalid key', { residueKey, chainId, labelSeqId });
-  return residueKey;
-}
-
-function toResidueKey(chainId: string, labelSeqId: number): string {
-  return `${chainId}:${labelSeqId}`;
-}
-
 function parseChainIdFromResidueKey(residueKey: string): string {
   const lastColon = residueKey.lastIndexOf(':');
   if (lastColon <= 0) return residueKey;
@@ -1437,37 +1193,6 @@ function summarizeDiagnosisStage(stage: DiagnosisStage): string {
   return 'Not ready';
 }
 
-function toDiagNote(
-  stage: DiagnosisStage,
-  output: SseEngineOutput | null,
-  mapping: SseMappingResult | null
-): string {
-  if (stage === 'comparison_ready') {
-    if (output?.metadata?.engine_name) {
-      return `${output.metadata.engine_name} applied`;
-    }
-    return `Comparison ready (${mapping?.diffs.length ?? 0} review points)`;
-  }
-  if (stage === 'override_ready') return 'Override ready';
-  if (stage === 'baseline_ready') return 'Baseline ready';
-  return 'Awaiting mmCIF load';
-}
-
-function deriveDiagnosisStage(
-  baselineMap: Map<string, SseLabel> | null,
-  output: SseEngineOutput | null,
-  mapping: SseMappingResult | null
-): DiagnosisStage {
-  if (!baselineMap || baselineMap.size === 0) return 'not_ready';
-  if (!output || output.residues.length === 0) return 'baseline_ready';
-  if (!mapping) return 'override_ready';
-  return 'comparison_ready';
-}
-
-function metricAvailable<T>(value: T): MetricValue<T> {
-  return { available: true, value };
-}
-
 function metricUnavailable<T>(reason: string): MetricValue<T> {
   return { available: false, value: null, reason };
 }
@@ -1488,21 +1213,21 @@ function createEmptyComparisonSummary(
     ambiguous_count: metricUnavailable('not loaded'),
     review_points_count: metricUnavailable('not loaded'),
     contract_summary: {
-      model_policy: 'Mol* current structure',
-      residue_key_policy: 'label_asym_id + label_seq_id',
-      mapping_basis: 'Residue key exact match',
+      model_policy: DIAGNOSIS_CONTRACT_CONTEXT.model_policy,
+      residue_key_policy: DIAGNOSIS_CONTRACT_CONTEXT.residue_key_policy,
+      mapping_basis: DIAGNOSIS_CONTRACT_CONTEXT.mapping_basis,
       mapped_count: null,
       candidate_count: null,
       mapped_rate: null,
       engine_summary: DASH,
     },
     contract_detail: {
-      baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
+      baseline_profile: DIAGNOSIS_CONTRACT_CONTEXT.baseline_profile,
       override_profile: DASH,
-      comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
-      chain_policy: 'All chains in current structure',
-      model_policy: 'Mol* current structure',
-      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
+      comparison_scope: DIAGNOSIS_CONTRACT_CONTEXT.comparison_scope,
+      chain_policy: DIAGNOSIS_CONTRACT_CONTEXT.chain_policy,
+      model_policy: DIAGNOSIS_CONTRACT_CONTEXT.model_policy,
+      mapping_basis: DIAGNOSIS_CONTRACT_CONTEXT.mapping_basis,
     },
     diagnosis_record: createDiagnosisRecord('not_ready', 'Awaiting mmCIF load'),
     engine_execution_record: null,
@@ -1880,127 +1605,4 @@ function countLabelsFromOutput(output: SseEngineOutput) {
   const out = { H: 0, E: 0, C: 0 };
   for (const r of output.residues) out[r.sse] += 1;
   return out;
-}
-
-/**
- * Builds SSE-Diag-owned comparison summary.
- * Keeps contract/diagnosis/execution summary semantics explicit and separate from Mol* adapter state.
- */
-function buildComparisonSummary({
-  baselineMap,
-  output,
-  mapping,
-  engineExecutionRecord,
-  comparisonStatus,
-  viewMode,
-  reviewPoints,
-}: {
-  baselineMap: Map<string, SseLabel> | null;
-  output: SseEngineOutput | null;
-  mapping: SseMappingResult | null;
-  engineExecutionRecord: EngineExecutionRecord | null;
-  comparisonStatus: ComparisonStatus;
-  viewMode: SseViewMode;
-  reviewPoints: MetricValue<number>;
-}): SseComparisonSummary {
-  const hasBaseline = baselineMap !== null;
-  const hasOverride = !!output && output.residues.length > 0;
-  const mappingAvailable = hasBaseline && hasOverride && mapping !== null;
-  const stage = deriveDiagnosisStage(baselineMap, output, mapping);
-  const note = toDiagNote(stage, output, mapping);
-
-  const engineSummary = output?.metadata
-    ? `${output.metadata.engine_name} ${output.metadata.engine_version} (${formatEngineStage(output.metadata.engine_stage)})`
-    : DASH;
-
-  const overrideProfile = output?.metadata
-    ? `${output.metadata.engine_name} ${output.metadata.engine_version} / ${formatEngineStage(output.metadata.engine_stage)}`
-    : DASH;
-
-  return {
-    comparison_status: comparisonStatus,
-    view_mode: viewMode,
-    engine_metadata: output?.metadata ?? null,
-    comparable_count: mappingAvailable
-      ? metricAvailable(mapping.stats.mapped_count)
-      : metricUnavailable('mapping not available'),
-    candidate_count: hasBaseline
-      ? metricAvailable(mapping ? mapping.stats.candidate_count : baselineMap.size)
-      : metricUnavailable('baseline not available'),
-    mapped_count: mappingAvailable ? metricAvailable(mapping.stats.mapped_count) : metricUnavailable('mapping not available'),
-    mapped_rate: mappingAvailable ? metricAvailable(mapping.stats.mapped_rate) : metricUnavailable('mapping not available'),
-    unmapped_total: mappingAvailable
-      ? metricAvailable(mapping.stats.unmapped_total)
-      : metricUnavailable('mapping not available'),
-    ambiguous_count: mappingAvailable
-      ? metricAvailable(mapping.stats.ambiguous_count)
-      : metricUnavailable('mapping not available'),
-    review_points_count: reviewPoints,
-    contract_summary: {
-      model_policy: 'Mol* current structure',
-      residue_key_policy: 'label_asym_id + label_seq_id',
-      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
-      mapped_count: mappingAvailable ? mapping.stats.mapped_count : null,
-      candidate_count: hasBaseline ? (mapping ? mapping.stats.candidate_count : baselineMap.size) : null,
-      mapped_rate: mappingAvailable ? mapping.stats.mapped_rate : null,
-      engine_summary: comparisonStatus === 'baseline_only' ? DASH : engineSummary,
-    },
-    contract_detail: {
-      baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
-      override_profile: comparisonStatus === 'baseline_only' ? DASH : overrideProfile,
-      comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
-      chain_policy: 'All chains in current structure',
-      model_policy: 'Mol* current structure',
-      mapping_basis: 'Residue key exact match (duplicate override keys -> ambiguous)',
-    },
-    diagnosis_record: createDiagnosisRecord(stage, note),
-    engine_execution_record: engineExecutionRecord,
-  };
-}
-
-function computeReviewPointsMetric(
-  mapping: SseMappingResult | null,
-  log: LogFn
-): { metric: MetricValue<number>; didFail: boolean } {
-  if (!mapping) {
-    return { metric: metricUnavailable('diff not available'), didFail: false };
-  }
-
-  try {
-    if (
-      mapping.stats.unmapped_baseline_only_count > 0 ||
-      mapping.stats.unmapped_override_only_count > 0 ||
-      mapping.stats.ambiguous_count > 0
-    ) {
-      log('[SSE-Diag] mapping incomplete (review_points uses mapped diff rows only):', {
-        candidateCount: mapping.stats.candidate_count,
-        mappedCount: mapping.stats.mapped_count,
-        unmappedBaselineOnly: mapping.stats.unmapped_baseline_only_count,
-        unmappedOverrideOnly: mapping.stats.unmapped_override_only_count,
-        ambiguousCount: mapping.stats.ambiguous_count,
-      });
-    }
-
-    log('[SSE-Diag] diffs count:', mapping.diffs.length);
-    log('[SSE-Diag] diffs sample:', mapping.diffs.slice(0, 30));
-    return { metric: metricAvailable(mapping.diffs.length), didFail: false };
-  } catch (e) {
-    log('[SSE-Diag] review points unavailable:', e instanceof Error ? e.message : String(e));
-    return { metric: metricUnavailable('diff failed'), didFail: true };
-  }
-}
-
-function deriveComparisonStatus(
-  baselineMap: Map<string, SseLabel> | null,
-  output: SseEngineOutput | null,
-  mapping: SseMappingResult | null
-): ComparisonStatus {
-  if (!baselineMap || baselineMap.size === 0) return 'partial';
-  if (!output || output.residues.length === 0) return 'baseline_only';
-  if (!mapping) return 'partial';
-  if (mapping.stats.mapped_count < mapping.stats.candidate_count) return 'partial';
-  if (mapping.stats.unmapped_override_only_count > 0) return 'partial';
-  if (mapping.stats.ambiguous_count > 0) return 'partial';
-
-  return 'full';
 }
