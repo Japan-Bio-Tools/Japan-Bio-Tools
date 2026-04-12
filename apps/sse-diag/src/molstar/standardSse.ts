@@ -8,6 +8,10 @@ import { SecondaryStructureProvider } from 'molstar/lib/mol-model-props/computed
 import type { SseLabel } from '../domain/sse/types';
 import { residueKeyToString } from '../domain/sse/compare';
 
+/**
+ * Mol* baseline SSE extraction adapter.
+ * It converts Mol* secondary-structure provider output into residue-key maps for SSE-Diag comparison.
+ */
 type LogFn = (msg: string, data?: unknown) => void;
 
 function colValue(col: any, row: number) {
@@ -83,6 +87,7 @@ async function safeAttachSecondaryStructureProvider(plugin: PluginContext, struc
   }
 }
 
+/** Reads baseline SSE labels from current Mol* structures into canonical residue-key map. */
 export async function getMolstarStandardSse(plugin: PluginContext, log?: LogFn): Promise<Map<string, SseLabel>> {
   const out = new Map<string, SseLabel>();
 

@@ -3,6 +3,10 @@ import { Loci } from 'molstar/lib/mol-model/loci';
 import { StructureElement } from 'molstar/lib/mol-model/structure';
 import type { Structure } from 'molstar/lib/mol-model/structure';
 
+/**
+ * Mol* selection/focus adapter.
+ * Receives residue keys from SSE-Diag state and applies highlight/select/camera actions only.
+ */
 type LogFn = (msg: string, data?: unknown) => void;
 
 export type ResidueFocusResult = {
@@ -50,6 +54,7 @@ function toResidueSchema(chainId: string, labelSeqId: number) {
   };
 }
 
+/** Applies highlight/select/focus to the residue represented by canonical residue_key. */
 export function focusAndHighlightResidueByKey(
   plugin: PluginUIContext,
   residueKey: string,
@@ -118,6 +123,7 @@ export function focusAndHighlightResidueByKey(
   return result;
 }
 
+/** Clears Mol* visual selection markers when table selection is reset. */
 export function clearDiffSelectionMarks(plugin: PluginUIContext, log?: LogFn): void {
   try {
     (plugin as any).managers?.interactivity?.lociHighlights?.clearHighlights?.();

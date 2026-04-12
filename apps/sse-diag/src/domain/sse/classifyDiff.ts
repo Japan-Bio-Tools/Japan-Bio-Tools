@@ -48,6 +48,10 @@ const KIND_ORDER: Record<DiffKind, number> = {
   Other: 600,
 };
 
+/**
+ * Classifies mapped diff rows into product-facing kinds and stable table sort order.
+ * Caller must pass review-row seeds only (unmapped/ambiguous are intentionally excluded upstream).
+ */
 export function classifyDiffRows(seeds: DiffRowSeed[]): ClassifiedDiffRowsResult {
   const prepared = seeds.map((seed): SeedWithKind => ({
     seed,
@@ -143,7 +147,7 @@ function resolveKind(
   singletonCandidates: Set<string>,
   boundaryShiftCandidates: Set<string>
 ): DiffKind {
-  // LabelFlip 系は R2.5 仕様上の必須分類なので優先する。
+  // LabelFlip kinds are required by the R2.5 contract and must take precedence.
   if (baseKind !== 'Other') return baseKind;
 
   if (singletonCandidates.has(residueKey)) return 'Singleton';

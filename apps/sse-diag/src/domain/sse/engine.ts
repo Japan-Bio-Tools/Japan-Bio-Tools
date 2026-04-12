@@ -6,6 +6,10 @@ export interface SseEngine {
 
 export type SseEngineFactoryParams = Record<string, string | number | boolean | null | undefined>;
 
+/**
+ * Internal engine descriptor contract used by SSE-Diag registry/factory flow.
+ * This is intentionally thin: enough for resolution/audit without introducing a plugin host layer.
+ */
 export type SseEngineDescriptor = {
   engine_key: string;
   engine_id: string;
@@ -16,6 +20,10 @@ export type SseEngineDescriptor = {
 
 export type SseEngineRegistry = Map<string, SseEngineDescriptor>;
 
+/**
+ * Engine resolution result kept as explicit app-side truth.
+ * requested_engine_key and resolved_engine_id must remain distinct for auditability.
+ */
 export type EngineResolutionResult = {
   requested_engine_key: string | null;
   resolved_engine_id: string | null;
@@ -24,6 +32,7 @@ export type EngineResolutionResult = {
   error: string | null;
 };
 
+/** Builds a key-indexed registry from bundled descriptors. */
 export function createSseEngineRegistry(descriptors: SseEngineDescriptor[]): SseEngineRegistry {
   const registry: SseEngineRegistry = new Map();
   for (const descriptor of descriptors) {
@@ -32,6 +41,10 @@ export function createSseEngineRegistry(descriptors: SseEngineDescriptor[]): Sse
   return registry;
 }
 
+/**
+ * Resolves requested engine key into a concrete descriptor.
+ * Unknown keys fail explicitly; default is used only when request is absent.
+ */
 export function resolveSseEngineDescriptor(
   registry: SseEngineRegistry,
   requestedEngineKey: string | null,

@@ -3,8 +3,8 @@ import type { SseEngineInput, SseEngineOutput, SseResidueKey, SseLabel } from '.
 import type { SseEngine, SseEngineDescriptor, SseEngineFactoryParams } from '../engine';
 
 /**
- * MVP用：範囲内だけ Sheet(E)、それ以外 Helix(H)
- * - input.residues が Array でなくても落ちないように強制的に配列化する
+ * Minimal default engine used for local prototyping.
+ * Assigns Sheet(E) inside range and Helix(H) outside range.
  */
 const DEFAULT_RANGE_LO = 10;
 const DEFAULT_RANGE_HI = 20;
@@ -71,6 +71,10 @@ function readRangeParam(
   return fallback;
 }
 
+/**
+ * Descriptor registered in the internal engine registry.
+ * Keeps engine-specific construction details outside the Viewer orchestration.
+ */
 export const prototypeRuleEngineDescriptor: SseEngineDescriptor = {
   engine_key: PROTOTYPE_RULE_ENGINE_KEY,
   engine_id: 'prototype-rule',
@@ -83,7 +87,7 @@ export const prototypeRuleEngineDescriptor: SseEngineDescriptor = {
   },
 };
 
-/** Set/Map/オブジェクトでも落ちないようにする */
+/** Tolerates array-like/iterable inputs to keep prototype calls resilient. */
 function normalizeResidues(residues: unknown): SseResidueKey[] {
   if (Array.isArray(residues)) return residues as SseResidueKey[];
 
@@ -92,7 +96,7 @@ function normalizeResidues(residues: unknown): SseResidueKey[] {
     return Array.from(residues as any) as SseResidueKey[];
   }
 
-  // Map の values()
+  // Map values()
   if (residues && typeof (residues as any).values === 'function') {
     try {
       return Array.from((residues as any).values()) as SseResidueKey[];

@@ -10,6 +10,10 @@ export type MetricValue<T> =
   | { available: true; value: T }
   | { available: false; value: null; reason?: string };
 
+/**
+ * Engine-provided execution metadata used by SSE-Diag summaries.
+ * This is attached to one engine output and must stay independent from Mol* adapter internals.
+ */
 export type SseEngineMetadata = {
   engine_id: string;
   engine_name: string;
@@ -21,6 +25,10 @@ export type SseEngineMetadata = {
   computed_at?: string;
 };
 
+/**
+ * Compact contract fields shown in HUD-level UI.
+ * This summary must remain stable and auditable even when detail wording changes.
+ */
 export type ComparisonContractSummary = {
   model_policy: string;
   residue_key_policy: string;
@@ -31,6 +39,10 @@ export type ComparisonContractSummary = {
   engine_summary: string;
 };
 
+/**
+ * Expanded contract fields for Diag/audit view.
+ * Kept separate from summary so table/HUD responsibilities stay minimal.
+ */
 export type ComparisonContractDetail = {
   baseline_profile: string;
   override_profile: string;
@@ -42,6 +54,10 @@ export type ComparisonContractDetail = {
 
 export type DiagnosisStage = 'not_ready' | 'baseline_ready' | 'override_ready' | 'comparison_ready';
 
+/**
+ * Lightweight user-facing diagnosis progress.
+ * This is not an engine execution history record.
+ */
 export type DiagnosisRecord = {
   diagnosis_stage: DiagnosisStage;
   baseline_ready: boolean;
@@ -60,6 +76,10 @@ export type EngineExecutionStatus =
   | 'completed'
   | 'discarded_stale';
 
+/**
+ * Audit-oriented per-run record for engine resolution/execution.
+ * Distinct from diagnosis stage and intended to preserve stale/discard history.
+ */
 export type EngineExecutionRecord = {
   run_id: string;
   requested_engine_key: string | null;
@@ -102,6 +122,10 @@ export type DiffRow = {
   filterable: boolean;
 };
 
+/**
+ * SSE-Diag-owned comparison truth used by HUD/Table/Diag.
+ * Mol* adapters can render/act on this state, but must not become its owner.
+ */
 export type SseComparisonSummary = {
   comparison_status: ComparisonStatus;
   view_mode: SseViewMode;

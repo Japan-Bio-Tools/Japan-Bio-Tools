@@ -3,6 +3,10 @@ import type { PluginContext } from 'molstar/lib/mol-plugin/context';
 import type { SseResidueKey } from '../domain/sse/types';
 import { residueKeyToString } from '../domain/sse/compare';
 
+/**
+ * Mol* extraction adapter.
+ * This module only reads normalized structure data from Mol* and must not own comparison truth.
+ */
 type LogFn = (msg: string, data?: unknown) => void;
 
 function colValue(col: any, row: number) {
@@ -29,10 +33,7 @@ function resolveSeqId(residues: any, ri: number): number | undefined {
 }
 
 /**
- * chainId を頑丈に取る：
- * 1) residues.(label/auth)_asym_id
- * 2) residues.chain_index -> chains.(label/auth)_asym_id
- * 3) residueAtomSegments.offsets[ri] -> startAtom -> chainAtomSegments.index[startAtom] -> chains.(label/auth)_asym_id
+ * Resolves chain id with multiple fallbacks across Mol* hierarchy shapes.
  */
 function resolveChainId(model: any, ri: number): string | undefined {
   const residues: any = model?.atomicHierarchy?.residues;
@@ -73,6 +74,7 @@ function resolveChainId(model: any, ri: number): string | undefined {
   return void 0;
 }
 
+/** Extracts canonical residue keys from the current Mol* structure. */
 export function extractResidueKeys(plugin: PluginContext, log?: LogFn): SseResidueKey[] {
   const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
   const structures = hierarchy?.structures ?? [];
@@ -92,7 +94,7 @@ export function extractResidueKeys(plugin: PluginContext, log?: LogFn): SseResid
   const n: number = residues?._rowCount ?? 0;
   log?.('[SSE-Diag] extractResidueKeys residue rows:', n);
 
-  // デバッグ：列/segmentの存在（今回の原因究明用）
+  // Debug details kept to diagnose mmCIF/schema variants.
   log?.('[SSE-Diag] extractResidueKeys columns:', {
     residues_label_asym_id: !!residues?.label_asym_id,
     residues_auth_asym_id: !!residues?.auth_asym_id,
@@ -151,6 +153,7 @@ function resolveResidueName(residues: any, ri: number): string | undefined {
   return trimmed.length > 0 ? trimmed : void 0;
 }
 
+/** Extracts human-readable residue labels used for Diff table display only. */
 export function extractResidueDisplayLabels(plugin: PluginContext, log?: LogFn): Map<string, string> {
   const hierarchy = (plugin as any).managers?.structure?.hierarchy?.current;
   const structures = hierarchy?.structures ?? [];

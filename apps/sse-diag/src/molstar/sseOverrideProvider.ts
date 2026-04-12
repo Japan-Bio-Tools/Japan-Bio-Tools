@@ -10,6 +10,10 @@ import { SecondaryStructureProvider } from 'molstar/lib/mol-model-props/computed
 import type { SseEngineOutput, SseLabel } from '../domain/sse/types';
 import { residueKeyToString } from '../domain/sse/compare';
 
+/**
+ * Mol* secondary-structure override adapter.
+ * It applies/restores provider values for rendering; comparison truth remains on SSE-Diag side.
+ */
 type LogFn = (msg: string, data?: unknown) => void;
 
 const NONE = { kind: 'none' } as const;
@@ -142,6 +146,7 @@ async function safeAttachSecondaryStructureProvider(plugin: PluginContext, struc
   }
 }
 
+/** Captures provider values so baseline view can be restored without reloading the structure. */
 export async function captureBaselineSecondaryStructureSnapshot(
   plugin: PluginContext,
   log?: LogFn
@@ -173,6 +178,7 @@ export async function captureBaselineSecondaryStructureSnapshot(
   return { entries };
 }
 
+/** Restores previously captured provider values onto still-alive current structures. */
 export async function restoreBaselineSecondaryStructureSnapshot(
   plugin: PluginContext,
   snapshot: SecondaryStructureBaselineSnapshot,
@@ -303,6 +309,7 @@ function buildOverrideSecondaryStructureForUnit(model: Model, ssOld: any, overri
   return SecondaryStructure(type as any, key as any, ELEMENTS as any, ssOld.getIndex as any);
 }
 
+/** Applies engine override SSE values into Mol* provider data for current structures. */
 export async function applyOverrideSseToMolstarModel(plugin: PluginContext, output: SseEngineOutput, log?: LogFn) {
   const override = new Map<string, SseLabel>();
   for (const r of output.residues) override.set(residueKeyToString(r), r.sse);

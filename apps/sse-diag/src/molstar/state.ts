@@ -3,14 +3,8 @@ import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 import { SecondaryStructureColorThemeProvider } from 'molstar/lib/mol-theme/color/secondary-structure';
 
 /**
- * 目的:
- * - Mol* の GUI: Component → polymer → Set coloring → (Residue Property) → Secondary Structure
- *   をコード側から強制する。
- *
- * 重要:
- * - Mol* v5.5.0 の updateRepresentationsTheme は
- *     updateRepresentationsTheme(components, { color, colorParams, ... })
- *   であり、{ colorTheme: ... } ではない。
+ * Mol* representation adapter helpers.
+ * These utilities only apply/rebuild visual state and must not own comparison truth.
  */
 
 export type LogFn = (msg: string, data?: unknown) => void;
@@ -50,8 +44,8 @@ function getFirstReprColorTheme(plugin: PluginUIContext) {
 }
 
 /**
- * 表示の coloring を「Secondary Structure」に寄せる
- * (= GUI の Set coloring を自動で押すのと同等)
+ * Forces component coloring to Secondary Structure,
+ * equivalent to applying Mol* "Set coloring -> Secondary Structure".
  */
 export async function forceSecondaryStructureColorTheme(
   plugin: PluginUIContext,
@@ -59,14 +53,14 @@ export async function forceSecondaryStructureColorTheme(
 ): Promise<string> {
   const themeName = (SecondaryStructureColorThemeProvider as any).name ?? 'secondary-structure';
 
-  // 1) テーマ登録（既に登録済みなら例外が出ても無視でOK）
+  // 1) Ensure theme registration.
   try {
     const registry = (plugin as any).representation?.structure?.themes?.colorThemeRegistry;
     if (registry?.add) {
       try {
         registry.add(SecondaryStructureColorThemeProvider);
       } catch (e) {
-        // "already registered." 想定
+        // "already registered" is acceptable.
         logf(log, '[SSE-Diag] ensureSecondaryStructureThemeRegistered', { err: String(e) });
       }
     }
@@ -74,7 +68,7 @@ export async function forceSecondaryStructureColorTheme(
     // ignore
   }
 
-  // 2) すべての polymer component に対してテーマ適用
+  // 2) Apply theme to all current polymer components.
   const comps = getAllComponents(plugin);
   if (comps.length === 0) {
     logf(log, '[SSE-Diag] forceSecondaryStructureColorTheme: no components yet');
@@ -88,10 +82,10 @@ export async function forceSecondaryStructureColorTheme(
     return themeName;
   }
 
-  // ★ここが本丸: { color } が正しい
+  // Mol* v5.5 expects `{ color }` (not `{ colorTheme }`).
   await fn.call(mgr, comps, { color: themeName });
 
-  // 3) 反映確認ログ（任意）
+  // 3) Optional post-check log.
   const after = getFirstReprColorTheme(plugin);
   logf(log, '[SSE-Diag] forceSecondaryStructureColorTheme applied', { themeName, after });
 
@@ -99,10 +93,8 @@ export async function forceSecondaryStructureColorTheme(
 }
 
 /**
- * SSE override の後に cartoon 表示だけ作り直す（POC用途）
- *
- * - preset を再適用すると coloring がデフォルト（chain-id等）に戻るので、
- *   最後に forceSecondaryStructureColorTheme() を必ず呼ぶ。
+ * Rebuilds cartoon representation after override apply/restore.
+ * Reapplying presets can reset coloring, so forceSecondaryStructureColorTheme() is called at the end.
  */
 export async function rebuildCartoonOnly(plugin: PluginUIContext, log?: LogFn): Promise<void> {
   const h = getHierarchy(plugin);
@@ -117,7 +109,7 @@ export async function rebuildCartoonOnly(plugin: PluginUIContext, log?: LogFn): 
     const cell = s?.cell;
     if (!cell) continue;
 
-    // polymer-cartoon があれば優先、ダメなら default
+    // Prefer polymer-cartoon; fallback to default if unavailable.
     try {
       await (plugin as any).builders?.structure?.representation?.applyPreset?.(cell, 'polymer-cartoon');
       logf(log, '[SSE-Diag] rebuild preset applied:', 'polymer-cartoon');

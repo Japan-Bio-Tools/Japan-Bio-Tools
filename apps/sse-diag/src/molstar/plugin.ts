@@ -4,13 +4,17 @@ import { renderReact18 } from 'molstar/lib/mol-plugin-ui/react18';
 import { DefaultPluginUISpec, type PluginUISpec } from 'molstar/lib/mol-plugin-ui/spec';
 import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context';
 
-const DEFAULT_EXPANDED = false; // ← true にすると Mol* の左右パネルを常時展開
+/**
+ * Mol* host bootstrapping adapter.
+ * This module owns Mol* mounting/disposal only; comparison/contract truth stays in SSE-Diag.
+ */
+const DEFAULT_EXPANDED = false; // true keeps Mol* side panels expanded.
 
 export async function createMolstarPlugin(target: HTMLElement): Promise<PluginUIContext> {
-  // HMR/再マウント時の衝突を避ける
+  // Avoid collisions on remount/HMR.
   target.innerHTML = '';
 
-  // Mol* UI を「右ペイン内」に閉じ込めるためのクラス（App.css側で使用）
+  // Keep Mol* UI scoped to the right pane host.
   target.classList.add('molstar-host');
 
   const base = DefaultPluginUISpec();
@@ -33,7 +37,7 @@ export async function createMolstarPlugin(target: HTMLElement): Promise<PluginUI
     render: renderReact18,
   });
 
-  // 保険：initial が効かないケース対策
+  // Fallback for environments where initial layout props are ignored.
   try {
     const layout: any = (plugin as any).layout;
     layout?.setProps?.({

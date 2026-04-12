@@ -43,6 +43,10 @@ import { clearDiffSelectionMarks, focusAndHighlightResidueByKey } from '../molst
 
 type LogFn = (msg: string, data?: unknown) => void;
 
+/**
+ * Lightweight cache of the latest successful override output for identical run inputs.
+ * This is an optimization only; it must not become comparison truth.
+ */
 type OverrideOutputCache = {
   requestedEngineKey: string | null;
   resolvedEngineId: string;
@@ -52,6 +56,7 @@ type OverrideOutputCache = {
   output: SseEngineOutput;
 };
 
+/** Internal execution result used by orchestration flow control. */
 type OverrideComputeResult = {
   output: SseEngineOutput | null;
   didFail: boolean;
@@ -65,8 +70,10 @@ export default function MolstarSseDiagViewer() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const pluginRef = useRef<PluginUIContext | null>(null);
 
+  // --- SSE-Diag-owned application state (authoritative product truth) ---
   const [fatal, setFatal] = useState<string | null>(null);
   const [mmcifText, setMmcifText] = useState('');
+  // Minimal parameter UI kept intentionally small and default-engine-oriented.
   const [rangeLo, setRangeLo] = useState(10);
   const [rangeHi, setRangeHi] = useState(20);
   const [requestedEngineKey, setRequestedEngineKey] = useState<string | null>(null);
@@ -82,6 +89,7 @@ export default function MolstarSseDiagViewer() {
   const [selectedDiffIndex, setSelectedDiffIndex] = useState<number | null>(null);
   const [engineExecutionRecords, setEngineExecutionRecords] = useState<EngineExecutionRecord[]>([]);
 
+  // --- Mutable refs for orchestration, cache, and selection sync ---
   const viewModeRef = useRef<SseViewMode>('baseline');
   const comparisonStatusRef = useRef<ComparisonStatus>('baseline_only');
   const baselineSnapshotRef = useRef<SecondaryStructureBaselineSnapshot | null>(null);
@@ -90,6 +98,7 @@ export default function MolstarSseDiagViewer() {
   const residueDisplayLabelMapRef = useRef<Map<string, string>>(new Map());
   const overrideOutputCacheRef = useRef<OverrideOutputCache | null>(null);
   const nextRunIdRef = useRef(0);
+  // Latest started run id; only this run may update current execution summary or visible comparison state.
   const latestRunIdRef = useRef<string | null>(null);
   const selectedDiffIndexRef = useRef<number | null>(null);
   const selectedResidueKeyRef = useRef<string | null>(null);
@@ -118,6 +127,7 @@ export default function MolstarSseDiagViewer() {
     []
   );
 
+  // --- Diff table filters ---
   const kindFilterOptions = useMemo(() => {
     const options = new Map<DiffKind, string>();
     for (const row of diffRows) {
@@ -152,6 +162,7 @@ export default function MolstarSseDiagViewer() {
     filteredDiffRows.length === 0 ||
     (selectedDiffIndex !== null && selectedDiffIndex >= filteredDiffRows.length - 1);
 
+  // --- Selection and HUD trace logs ---
   useEffect(() => {
     const selected = selectedDiffRow;
     if (!selected) {
@@ -245,6 +256,7 @@ export default function MolstarSseDiagViewer() {
     if (!chainFilterOptions.includes(chainFilter)) setChainFilter('all');
   }, [chainFilter, chainFilterOptions]);
 
+  // Keep row selection stable when filter changes reshuffle visible table indexes.
   useEffect(() => {
     const currentResidueKey = selectedResidueKeyRef.current;
     if (currentResidueKey) {
@@ -264,6 +276,14 @@ export default function MolstarSseDiagViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredDiffRows]);
 
+  function isCurrentRun(runId: string): boolean {
+    return latestRunIdRef.current === runId;
+  }
+
+  /**
+   * Updates execution history and, optionally, the current execution summary shown in HUD/Diag.
+   * History includes stale runs; the current summary is gated to the latest run id.
+   */
   function upsertEngineExecutionRecord(
     record: EngineExecutionRecord,
     options?: { updateCurrentSummary?: boolean }
@@ -278,12 +298,13 @@ export default function MolstarSseDiagViewer() {
       return [record, ...current].slice(0, 20);
     });
     const shouldUpdateCurrentSummary =
-      options?.updateCurrentSummary ?? record.run_id === latestRunIdRef.current;
+      options?.updateCurrentSummary ?? isCurrentRun(record.run_id);
     if (shouldUpdateCurrentSummary) {
       setHudSummary((current) => ({ ...current, engine_execution_record: record }));
     }
   }
 
+  /** Monotonic run id source used for stale-discard decisions. */
   function nextRunId(): string {
     nextRunIdRef.current += 1;
     return `run-${nextRunIdRef.current}`;
@@ -311,6 +332,7 @@ export default function MolstarSseDiagViewer() {
     };
   }
 
+  // Central selection sync for table, HUD current row, and Mol* focus/highlight actions.
   function applySelectionState(
     nextIndex: number | null,
     rows: DiffRow[],
@@ -484,6 +506,10 @@ export default function MolstarSseDiagViewer() {
     pushLog('[SSE-Diag] analysis cache reset:', { reason });
   }
 
+  /**
+   * Resolves and executes current requested engine parameters.
+   * Stale runs are recorded in history but excluded from active comparison state updates.
+   */
   async function ensureOverrideOutput(trigger: string): Promise<OverrideComputeResult> {
     const residueKeys = residueKeysRef.current;
     if (residueKeys.length === 0) {
@@ -491,6 +517,7 @@ export default function MolstarSseDiagViewer() {
       return { output: null, didFail: false, staleDiscarded: false, executionRecord: null };
     }
 
+    // Minimal current parameter bag (interpreted by the resolved engine implementation).
     const effectiveParams: Record<string, string | number | boolean | null> = {
       rangeLo,
       rangeHi,
@@ -569,7 +596,7 @@ export default function MolstarSseDiagViewer() {
       const engine = resolution.descriptor.create(effectiveParams as SseEngineFactoryParams);
       const output = await engine.compute({ residues: residueKeys });
 
-      if (latestRunIdRef.current !== runId) {
+      if (!isCurrentRun(runId)) {
         const staleRecord: EngineExecutionRecord = {
           ...record,
           status: 'discarded_stale',
@@ -621,7 +648,7 @@ export default function MolstarSseDiagViewer() {
       return { output, didFail: false, staleDiscarded: false, executionRecord: completedRecord };
     } catch (e) {
       const message = e instanceof Error ? (e.stack ?? e.message) : String(e);
-      if (latestRunIdRef.current !== runId) {
+      if (!isCurrentRun(runId)) {
         const staleFailedRecord: EngineExecutionRecord = {
           ...record,
           status: 'discarded_stale',
@@ -702,6 +729,7 @@ export default function MolstarSseDiagViewer() {
     }
   }
 
+  // Rebuilds contract/metrics summary after pipeline or view-mode execution path.
   function updateHudSummaryForOutput(
     baselineMap: Map<string, SseLabel> | null,
     output: SseEngineOutput | null,
@@ -725,6 +753,7 @@ export default function MolstarSseDiagViewer() {
     );
   }
 
+  // Generates mapped-only diff review rows and applies active table filters.
   function updateDiffRows(
     mapping: SseMappingResult | null,
     reason: string
@@ -1028,6 +1057,7 @@ export default function MolstarSseDiagViewer() {
     });
   }
 
+  // --- UI composition: left (Table + Diag + controls) / right (Mol* viewer + HUD) ---
   return (
     <div
       data-comparison-status={comparisonStatus}
@@ -1305,6 +1335,7 @@ export default function MolstarSseDiagViewer() {
   );
 }
 
+// --- Generic formatting and table helper utilities ---
 function safeJson(v: unknown): string {
   try {
     return JSON.stringify(v);
@@ -1371,6 +1402,7 @@ function parseChainIdFromResidueKey(residueKey: string): string {
   return residueKey.slice(0, lastColon);
 }
 
+// Applies user-facing table filters over mapped diff review rows.
 function filterDiffRows(
   rows: DiffRow[],
   kindFilter: DiffKindFilter,
@@ -1751,8 +1783,10 @@ function SseDiagPanel({
   summary: SseComparisonSummary;
   executionRecords: EngineExecutionRecord[];
 }) {
+  // Current execution summary (single run) comes from summary.engine_execution_record.
   const diagnosisRecord = summary.diagnosis_record;
   const exec = summary.engine_execution_record;
+  // Stale/discard history remains visible separately for auditability.
   const recentStale = executionRecords.filter((record) => record.status === 'discarded_stale').slice(0, 3);
   const stageText = summarizeDiagnosisStage(diagnosisRecord.diagnosis_stage);
   const effectiveParamsText = formatEffectiveParams(exec, summary);
@@ -1848,6 +1882,10 @@ function countLabelsFromOutput(output: SseEngineOutput) {
   return out;
 }
 
+/**
+ * Builds SSE-Diag-owned comparison summary.
+ * Keeps contract/diagnosis/execution summary semantics explicit and separate from Mol* adapter state.
+ */
 function buildComparisonSummary({
   baselineMap,
   output,
