@@ -1,4 +1,4 @@
-# Japan-Bio-Tools
+# Japan-Bio-Tools（構造バイオインフォマティクスツール群）
 
 Japan-Bio-Tools は、**ブラウザ完結・完全サーバーレス**で動作する、
 構造バイオインフォマティクス向けツール群です。
@@ -12,12 +12,14 @@ Japan-Bio-Tools は、**ブラウザ完結・完全サーバーレス**で動作
 
 ## 現在の主戦場
 - `apps/sse-diag`
-  - Secondary Structure Diagnostic
+  - 二次構造診断
   - Mol*標準SSEと外部計算SSEを、**比較成立条件つき**で診断するツール
 
 ## ドキュメント
-- `docs/architecture.md`
-  - 現在の正本仕様
+- [`docs/architecture.md`](../docs/architecture.md)
+  - SSE-Diag アーキテクチャの親正本
+- [`docs/architecture/`](../docs/architecture/)
+  - 状態モデル、UI 契約、Diagnosis Pipeline、SSE Engine、Mol* 境界、ロードマップの詳細正本
 - `docs/repo-map.md`
   - リポジトリ構成
 - `docs/dev-setup.md`
@@ -33,8 +35,10 @@ Japan-Bio-Tools は、**ブラウザ完結・完全サーバーレス**で動作
 ```bash
 npm ci
 npm run dev:sse-diag
+```
 
-公開
-Portal: /Japan-Bio-Tools/
-SSE-Diag: /Japan-Bio-Tools/sse-diag/
+## 公開
+
+- Portal: `/Japan-Bio-Tools/`
+- SSE-Diag: `/Japan-Bio-Tools/sse-diag/`
 

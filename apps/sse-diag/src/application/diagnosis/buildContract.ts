@@ -53,6 +53,9 @@ export function buildContract(input: BuildContractInput): BuildContractResult {
       engine_summary: comparisonStatus === 'baseline_only' ? DASH : engineSummary,
     },
     contract_detail: {
+      baseline_source_kind: contractContext.baseline_source_kind,
+      baseline_resolved_source: contractContext.baseline_resolved_source,
+      baseline_annotation_origin: contractContext.baseline_annotation_origin ?? null,
       baseline_profile: contractContext.baseline_profile,
       override_profile:
         comparisonStatus === 'baseline_only'
@@ -75,13 +78,22 @@ function buildOverrideProfile(
     executionRecord.resolved_engine_id ?? engineMetadata?.engine_id ?? 'unresolved';
   const engineName =
     engineMetadata?.engine_name ?? executionRecord.engine_name ?? 'unknown';
+  const fidelityClass = engineMetadata?.fidelity_class ?? 'unknown';
+  const compatibilityClaim = engineMetadata?.compatibility_claim ?? DASH;
+  const implementationOrigin = engineMetadata?.implementation_origin ?? 'unknown';
+  const implementationReference = engineMetadata?.implementation_reference ?? DASH;
+  const upstreamVersion = engineMetadata?.upstream_version_label ?? DASH;
   const effectiveParams =
     engineMetadata?.effective_params ?? executionRecord.effective_params ?? {};
+  const coverageReport = engineMetadata?.coverage_report;
+  const coverageText = coverageReport
+    ? `${coverageReport.assigned_total}/${coverageReport.candidate_total} (${(coverageReport.coverage_rate * 100).toFixed(1)}%)`
+    : DASH;
 
   const effectiveParamsText =
     Object.keys(effectiveParams).length > 0 ? JSON.stringify(effectiveParams) : '{}';
 
-  return `requested=${requestedEngineKey}; resolved=${resolvedEngineId}; engine=${engineName}; effective_params=${effectiveParamsText}`;
+  return `requested=${requestedEngineKey}; resolved=${resolvedEngineId}; engine=${engineName}; fidelity=${fidelityClass}; compatibility=${compatibilityClaim}; origin=${implementationOrigin}; reference=${implementationReference}; upstream=${upstreamVersion}; coverage=${coverageText}; effective_params=${effectiveParamsText}`;
 }
 
 function buildEngineSummary(

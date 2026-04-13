@@ -1,6 +1,10 @@
 import type { EngineResolutionMode, SseEngineInput, SseEngineOutput, SseEngineStage } from './types';
 
 export interface SseEngine {
+  /**
+   * EngineInput v2 を受け取り、assignment と provenance/capability を返す。
+   * compute は known method / prototype を問わず同じ非同期契約を維持する。
+   */
   compute(input: SseEngineInput): Promise<SseEngineOutput>;
 }
 
@@ -15,6 +19,9 @@ export type SseEngineDescriptor = {
   engine_id: string;
   engine_name: string;
   engine_stage: SseEngineStage;
+  algorithm_family: string;
+  reference_label: string;
+  default_override_candidate?: boolean;
   create(params: SseEngineFactoryParams): SseEngine;
 };
 

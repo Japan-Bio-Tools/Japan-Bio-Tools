@@ -9,9 +9,13 @@ import type {
   DiagnosisStage,
   DiffKind,
   DiffRow,
+  EngineCoverageReport,
+  EngineDegradationReport,
   EngineExecutionRecord,
+  EngineUnavailableReason,
   EngineResolutionMode,
   MetricValue,
+  RawBackboneCarrier,
   SseComparisonSummary,
   SseEngineOutput,
   SseEngineStage,
@@ -20,12 +24,21 @@ import type {
   SseViewMode,
 } from '../domain/sse/types';
 import { loadMmcifText } from '../molstar/load';
-import { extractResidueDisplayLabels, extractResidueKeys } from '../molstar/extract';
+import {
+  extractRawBackboneCarrier,
+  extractResidueDisplayLabels,
+  extractResidueKeys,
+} from '../molstar/extract';
 import { getMolstarStandardSse } from '../molstar/standardSse';
 import { rebuildCartoonOnly, forceSecondaryStructureColorTheme } from '../molstar/state';
 
 import { createSseEngineRegistry } from '../domain/sse/engine';
-import { DEFAULT_SSE_ENGINE_KEY, SSE_ENGINE_DESCRIPTORS } from '../domain/sse/engines/registry';
+import {
+  DEFAULT_OVERRIDE_CANDIDATE_ENGINE_KEY,
+  DEFAULT_SSE_ENGINE_KEY,
+  PROTOTYPE_ENGINE_KEY,
+  SSE_ENGINE_DESCRIPTORS,
+} from '../domain/sse/engines/registry';
 import { runDiagnosisPipeline } from '../application/diagnosis/runDiagnosisPipeline';
 import type {
   DiagnosisContractContext,
@@ -44,6 +57,9 @@ type LogFn = (msg: string, data?: unknown) => void;
 type DiffKindFilter = 'all' | DiffKind;
 
 const DIAGNOSIS_CONTRACT_CONTEXT: DiagnosisContractContext = {
+  baseline_source_kind: 'molstar_auto',
+  baseline_resolved_source: 'Mol* SecondaryStructureProvider auto',
+  baseline_annotation_origin: null,
   baseline_profile: 'Mol* SecondaryStructureProvider (current structure)',
   comparison_scope: 'Baseline candidate_set (all baseline residue keys)',
   chain_policy: 'All chains in current structure',
@@ -59,9 +75,8 @@ export default function MolstarSseDiagViewer() {
   // --- SSE-Diag-owned application state (authoritative product truth) ---
   const [fatal, setFatal] = useState<string | null>(null);
   const [mmcifText, setMmcifText] = useState('');
-  // Minimal parameter UI kept intentionally small and default-engine-oriented.
-  const [rangeLo, setRangeLo] = useState(10);
-  const [rangeHi, setRangeHi] = useState(20);
+  const [prototypeRangeLo, setPrototypeRangeLo] = useState(10);
+  const [prototypeRangeHi, setPrototypeRangeHi] = useState(20);
   const [requestedEngineKey, setRequestedEngineKey] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<SseViewMode>('baseline');
   const [comparisonStatus, setComparisonStatus] = useState<ComparisonStatus>('baseline_only');
@@ -81,6 +96,7 @@ export default function MolstarSseDiagViewer() {
   const baselineSnapshotRef = useRef<SecondaryStructureBaselineSnapshot | null>(null);
   const baselineMapRef = useRef<Map<string, SseLabel> | null>(null);
   const residueKeysRef = useRef<SseResidueKey[]>([]);
+  const rawBackboneRef = useRef<RawBackboneCarrier | null>(null);
   const residueDisplayLabelMapRef = useRef<Map<string, string>>(new Map());
   const nextRunIdRef = useRef(0);
   // Latest started run id; only this run may update current execution summary or visible comparison state.
@@ -111,6 +127,8 @@ export default function MolstarSseDiagViewer() {
     () => createSseEngineRegistry(SSE_ENGINE_DESCRIPTORS),
     []
   );
+  const effectiveEngineKeyForParams = requestedEngineKey ?? DEFAULT_SSE_ENGINE_KEY;
+  const showPrototypeParams = effectiveEngineKeyForParams === PROTOTYPE_ENGINE_KEY;
 
   // --- Diff table filters ---
   const kindFilterOptions = useMemo(() => {
@@ -472,6 +490,7 @@ export default function MolstarSseDiagViewer() {
     baselineSnapshotRef.current = null;
     baselineMapRef.current = null;
     residueKeysRef.current = [];
+    rawBackboneRef.current = null;
     residueDisplayLabelMapRef.current = new Map();
     latestRunIdRef.current = null;
     setDiffRows([]);
@@ -508,6 +527,29 @@ export default function MolstarSseDiagViewer() {
     }
 
     const residueKeys = residueKeysRef.current;
+    const rawBackbone = rawBackboneRef.current;
+    if (!rawBackbone) {
+      const note = 'Raw backbone unavailable: extraction missing';
+      setFatal(note);
+      updateComparisonStatus('baseline_only');
+      setHudSummary((current) => ({
+        ...current,
+        comparison_status: 'baseline_only',
+        view_mode: 'baseline',
+        diagnosis_record: createDiagnosisRecord('baseline_ready', note),
+      }));
+      pushLog('[SSE-Diag] diagnosis pipeline blocked:', {
+        trigger,
+        reason: 'raw backbone unavailable',
+      });
+      return null;
+    }
+    const resolvedEngineKeyForParams = requestedEngineKey ?? DEFAULT_SSE_ENGINE_KEY;
+    const engineParams = buildEngineParams(
+      resolvedEngineKeyForParams,
+      prototypeRangeLo,
+      prototypeRangeHi
+    );
     const runId = nextRunId();
     latestRunIdRef.current = runId;
 
@@ -515,9 +557,11 @@ export default function MolstarSseDiagViewer() {
       trigger,
       run_id: runId,
       requested_engine_key: requestedEngineKey,
-      rangeLo,
-      rangeHi,
+      resolved_engine_key_for_params: resolvedEngineKeyForParams,
+      engine_params: engineParams,
       residues: residueKeys.length,
+      raw_backbone_residue_count: rawBackbone.residue_count,
+      raw_backbone_missing_required_count: rawBackbone.missing_required_count,
     });
 
     const result = await runDiagnosisPipeline({
@@ -525,10 +569,12 @@ export default function MolstarSseDiagViewer() {
       requested_engine_key: requestedEngineKey,
       default_engine_key: DEFAULT_SSE_ENGINE_KEY,
       engine_registry: engineRegistry,
-      engine_params: { rangeLo, rangeHi },
+      engine_params: engineParams,
       baseline_map: baselineMap,
       residue_keys: residueKeys,
       residue_display_labels: residueDisplayLabelMapRef.current,
+      raw_backbone: rawBackbone,
+      derived_geometry: null,
       contract_context: DIAGNOSIS_CONTRACT_CONTEXT,
       view_mode: viewModeForSummary,
       is_run_current: isCurrentRun,
@@ -778,6 +824,7 @@ export default function MolstarSseDiagViewer() {
       pushLog('[SSE-Diag] extractResidueKeys()');
       const residueKeys = extractResidueKeys(plugin, pushLog);
       residueKeysRef.current = residueKeys;
+      rawBackboneRef.current = extractRawBackboneCarrier(plugin, residueKeys, pushLog);
       residueDisplayLabelMapRef.current = extractResidueDisplayLabels(plugin, pushLog);
       pushLog('[SSE-Diag] residueKeys:', residueKeys.length);
 
@@ -872,28 +919,6 @@ export default function MolstarSseDiagViewer() {
           Drop mmCIF here
         </div>
 
-        <div style={{ fontSize: 12, marginBottom: 6, color: '#555' }}>
-          Engine parameters（現在選択中の engine が利用する値）
-        </div>
-        <label style={{ fontSize: 12 }}>param.rangeLo</label>
-        <input
-          type="number"
-          value={rangeLo}
-          onChange={(e) => setRangeLo(Number(e.target.value))}
-          style={{ width: '100%', marginBottom: 8 }}
-        />
-
-
-        <label style={{ fontSize: 12 }}>param.rangeHi</label>
-        <input
-          type="number"
-          value={rangeHi}
-          onChange={(e) => setRangeHi(Number(e.target.value))}
-          style={{ width: '100%', marginBottom: 8 }}
-        />
-        <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
-          パラメータ解釈は engine 実装に依存します。
-        </div>
         <label style={{ fontSize: 12 }}>engine</label>
         <select
           value={requestedEngineKey ?? ''}
@@ -910,9 +935,39 @@ export default function MolstarSseDiagViewer() {
           {SSE_ENGINE_DESCRIPTORS.map((descriptor) => (
             <option key={descriptor.engine_key} value={descriptor.engine_key}>
               {descriptor.engine_key} ({descriptor.engine_name})
+              {descriptor.default_override_candidate ? ' [default候補]' : ''}
             </option>
           ))}
         </select>
+        <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
+          Baseline は Mol* auto を維持し、Override は known methods を軸に比較します。
+          {' '}
+          既定候補は <code>{DEFAULT_OVERRIDE_CANDIDATE_ENGINE_KEY}</code> です（切替ゲート充足前は固定切替しません）。
+        </div>
+        {showPrototypeParams && (
+          <div style={{ marginBottom: 8, padding: '8px 10px', border: '1px solid #e5e5e5', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, marginBottom: 6, color: '#555' }}>
+              `prototype.rule` 補助パラメータ
+            </div>
+            <label style={{ fontSize: 12 }}>param.rangeLo</label>
+            <input
+              type="number"
+              value={prototypeRangeLo}
+              onChange={(e) => setPrototypeRangeLo(Number(e.target.value))}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
+            <label style={{ fontSize: 12 }}>param.rangeHi</label>
+            <input
+              type="number"
+              value={prototypeRangeHi}
+              onChange={(e) => setPrototypeRangeHi(Number(e.target.value))}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
+            <div style={{ fontSize: 11, color: '#666' }}>
+              Known methods には range パラメータを適用しません。
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
           <button style={{ flex: 1 }} disabled={!mmcifText} onClick={() => void runPipeline(mmcifText)}>
             再解析（load → compare）
@@ -1172,6 +1227,20 @@ function filterDiffRows(
   });
 }
 
+function buildEngineParams(
+  engineKey: string,
+  prototypeRangeLo: number,
+  prototypeRangeHi: number
+): Record<string, string | number | boolean | null | undefined> {
+  if (engineKey === PROTOTYPE_ENGINE_KEY) {
+    return {
+      rangeLo: prototypeRangeLo,
+      rangeHi: prototypeRangeHi,
+    };
+  }
+  return {};
+}
+
 function createDiagnosisRecord(stage: DiagnosisStage, note: string): DiagnosisRecord {
   const baselineReady = stage !== 'not_ready';
   const overrideReady = stage === 'override_ready' || stage === 'comparison_ready';
@@ -1205,6 +1274,7 @@ function createEmptyComparisonSummary(
     comparison_status: comparisonStatus,
     view_mode: viewMode,
     engine_metadata: null,
+    engine_capability: null,
     comparable_count: metricUnavailable('not loaded'),
     candidate_count: metricUnavailable('not loaded'),
     mapped_count: metricUnavailable('not loaded'),
@@ -1212,6 +1282,10 @@ function createEmptyComparisonSummary(
     unmapped_total: metricUnavailable('not loaded'),
     ambiguous_count: metricUnavailable('not loaded'),
     review_points_count: metricUnavailable('not loaded'),
+    coverage_rate: metricUnavailable('not loaded'),
+    degraded_count: metricUnavailable('not loaded'),
+    unavailable_count: metricUnavailable('not loaded'),
+    unavailable_reasons: [],
     contract_summary: {
       model_policy: DIAGNOSIS_CONTRACT_CONTEXT.model_policy,
       residue_key_policy: DIAGNOSIS_CONTRACT_CONTEXT.residue_key_policy,
@@ -1222,6 +1296,9 @@ function createEmptyComparisonSummary(
       engine_summary: DASH,
     },
     contract_detail: {
+      baseline_source_kind: DIAGNOSIS_CONTRACT_CONTEXT.baseline_source_kind,
+      baseline_resolved_source: DIAGNOSIS_CONTRACT_CONTEXT.baseline_resolved_source,
+      baseline_annotation_origin: DIAGNOSIS_CONTRACT_CONTEXT.baseline_annotation_origin ?? null,
       baseline_profile: DIAGNOSIS_CONTRACT_CONTEXT.baseline_profile,
       override_profile: DASH,
       comparison_scope: DIAGNOSIS_CONTRACT_CONTEXT.comparison_scope,
@@ -1242,6 +1319,9 @@ function listUnavailableMetrics(summary: SseComparisonSummary): string[] {
     ['unmapped_total', summary.unmapped_total],
     ['ambiguous_count', summary.ambiguous_count],
     ['mapped_rate', summary.mapped_rate],
+    ['coverage_rate', summary.coverage_rate],
+    ['degraded_count', summary.degraded_count],
+    ['unavailable_count', summary.unavailable_count],
   ];
   return metrics.filter(([, metric]) => !metric.available).map(([name]) => name);
 }
@@ -1298,6 +1378,17 @@ function formatMappedRate(summary: SseComparisonSummary): string {
   return `Comparable ${summary.comparable_count.value} / Candidate ${summary.candidate_count.value} (${formatPercent(summary.mapped_rate.value)})`;
 }
 
+function formatCoverageSummary(summary: SseComparisonSummary): string {
+  if (!summary.coverage_rate.available) return DASH;
+  const report = summary.engine_metadata?.coverage_report;
+  const degraded = summary.degraded_count.available ? summary.degraded_count.value : 0;
+  const unavailable = summary.unavailable_count.available ? summary.unavailable_count.value : 0;
+  if (report) {
+    return `${report.assigned_total}/${report.candidate_total} (${formatPercent(report.coverage_rate)}), degraded ${degraded}, unavailable ${unavailable}`;
+  }
+  return `${formatPercent(summary.coverage_rate.value)}, degraded ${degraded}, unavailable ${unavailable}`;
+}
+
 function formatContractMappedRate(summary: SseComparisonSummary): string {
   const mapped = summary.contract_summary.mapped_count;
   const candidate = summary.contract_summary.candidate_count;
@@ -1314,6 +1405,27 @@ function formatInputProfile(summary: SseComparisonSummary): string {
   if (!profile) return DASH;
   const entries = Object.entries(profile).map(([key, value]) => `${key}=${String(value)}`);
   return entries.join(', ');
+}
+
+function formatCoverageReport(report: EngineCoverageReport | null): string {
+  if (!report) return DASH;
+  return `${report.assigned_total}/${report.candidate_total} (${formatPercent(report.coverage_rate)}), comparable=${report.comparable_total}`;
+}
+
+function formatDegradationSummary(report: EngineDegradationReport | null): string {
+  if (!report) return DASH;
+  const details = report.details.length > 0 ? report.details.join('; ') : 'details: none';
+  return `${report.degraded ? 'degraded' : 'normal'} (${report.degraded_count}) / policy: ${report.policy} / ${details}`;
+}
+
+function formatUnavailableReasons(reasons: EngineUnavailableReason[]): string {
+  if (reasons.length === 0) return DASH;
+  return reasons.map((reason) => `${reason.reason} x${reason.count}`).join(', ');
+}
+
+function formatStringList(values: string[] | undefined): string {
+  if (!values || values.length === 0) return DASH;
+  return values.join(', ');
 }
 
 function formatEngineStageOrDash(stage: SseEngineStage | null): string {
@@ -1368,13 +1480,16 @@ function SseDiagHud({
 }) {
   const currentClassText = selectedDiffRow?.kind_label ?? DASH;
   const currentResidueText = selectedDiffRow?.display_residue ?? DASH;
+  const baselineResolvedSource = summary.contract_detail.baseline_resolved_source || DASH;
+  const overrideAlgorithm =
+    summary.comparison_status === 'baseline_only' ? DASH : formatEngineNameVersion(summary);
 
   const compactText = [
-    formatStatus(summary.comparison_status),
-    `View: ${formatViewMode(summary.view_mode)}`,
-    formatEngineStageForHud(summary),
-    `Review points ${formatMetric(summary.review_points_count)}`,
-    `Unmapped ${formatMetric(summary.unmapped_total)}`,
+    `Status ${formatStatus(summary.comparison_status)}`,
+    `View ${formatViewMode(summary.view_mode)}`,
+    `Baseline ${baselineResolvedSource}`,
+    `Override ${overrideAlgorithm}`,
+    `Coverage ${formatCoverageSummary(summary)}`,
     `Current ${currentDiffIndexText}`,
   ].join(' · ');
 
@@ -1475,6 +1590,11 @@ function SseDiagHud({
               <HudField label="Current diff index" value={currentDiffIndexText} />
               <HudField label="Current class" value={currentClassText} />
               <HudField label="Selected residue" value={currentResidueText} />
+              <HudField label="Baseline source" value={baselineResolvedSource} />
+              <HudField label="Override algorithm" value={overrideAlgorithm} />
+              <HudField label="Coverage" value={formatCoverageSummary(summary)} />
+              <HudField label="Degraded" value={formatMetric(summary.degraded_count)} />
+              <HudField label="Unavailable" value={formatMetric(summary.unavailable_count)} />
               <HudField label="Comparable" value={formatMetric(summary.comparable_count)} />
               <HudField label="Candidate" value={formatMetric(summary.candidate_count)} />
               <HudField label="Mapped rate" value={formatMappedRate(summary)} />
@@ -1511,15 +1631,20 @@ function SseDiagPanel({
   // Current execution summary (single run) comes from summary.engine_execution_record.
   const diagnosisRecord = summary.diagnosis_record;
   const exec = summary.engine_execution_record;
+  const engineMetadata = summary.engine_metadata;
+  const engineCapability = summary.engine_capability;
+  const coverageReport = engineMetadata?.coverage_report ?? exec?.coverage_report ?? null;
+  const degradationReport = engineMetadata?.degradation_report ?? exec?.degradation_report ?? null;
+  const unavailableReasons = summary.unavailable_reasons;
   // Stale/discard history remains visible separately for auditability.
   const recentStale = executionRecords.filter((record) => record.status === 'discarded_stale').slice(0, 3);
   const stageText = summarizeDiagnosisStage(diagnosisRecord.diagnosis_stage);
   const effectiveParamsText = formatEffectiveParams(exec, summary);
-  const resolvedEngineName = exec ? (exec.engine_name ?? DASH) : (summary.engine_metadata?.engine_name ?? DASH);
-  const resolvedEngineVersion = exec ? (exec.engine_version ?? DASH) : (summary.engine_metadata?.engine_version ?? DASH);
+  const resolvedEngineName = exec ? (exec.engine_name ?? DASH) : (engineMetadata?.engine_name ?? DASH);
+  const resolvedEngineVersion = exec ? (exec.engine_version ?? DASH) : (engineMetadata?.engine_version ?? DASH);
   const resolvedEngineStage = exec
     ? formatEngineStageOrDash(exec.engine_stage)
-    : formatEngineStageOrDash(summary.engine_metadata?.engine_stage ?? null);
+    : formatEngineStageOrDash(engineMetadata?.engine_stage ?? null);
 
   return (
     <div style={{ marginTop: 10, border: '1px solid #ddd', borderRadius: 8, overflow: 'hidden' }}>
@@ -1542,7 +1667,11 @@ function SseDiagPanel({
           <HudField label="Baseline ready" value={diagnosisRecord.baseline_ready ? 'Yes' : 'No'} />
           <HudField label="Override ready" value={diagnosisRecord.override_ready ? 'Yes' : 'No'} />
           <HudField label="Comparison ready" value={diagnosisRecord.comparison_ready ? 'Yes' : 'No'} />
+          <HudField label="Baseline source kind" value={summary.contract_detail.baseline_source_kind} />
+          <HudField label="Baseline resolved source" value={summary.contract_detail.baseline_resolved_source} />
+          <HudField label="Baseline annotation origin" value={summary.contract_detail.baseline_annotation_origin ?? DASH} />
           <HudField label="Input profile" value={formatInputProfile(summary)} />
+          <HudField label="Coverage summary" value={formatCoverageSummary(summary)} />
         </div>
         <div style={{ fontWeight: 600 }}>Engine execution detail</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 10px' }}>
@@ -1551,6 +1680,13 @@ function SseDiagPanel({
           <HudField label="engine_name" value={resolvedEngineName} />
           <HudField label="engine_version" value={resolvedEngineVersion} />
           <HudField label="engine_stage" value={resolvedEngineStage} />
+          <HudField label="algorithm_family" value={engineMetadata?.algorithm_family ?? DASH} />
+          <HudField label="implementation_origin" value={engineMetadata?.implementation_origin ?? DASH} />
+          <HudField label="reference_label" value={engineMetadata?.reference_label ?? DASH} />
+          <HudField label="fidelity_class" value={engineMetadata?.fidelity_class ?? DASH} />
+          <HudField label="compatibility_claim" value={engineMetadata?.compatibility_claim ?? DASH} />
+          <HudField label="implementation_reference" value={engineMetadata?.implementation_reference ?? DASH} />
+          <HudField label="upstream_version_label" value={engineMetadata?.upstream_version_label ?? DASH} />
           <HudField label="resolution_mode" value={exec ? formatResolutionMode(exec.resolution_mode) : DASH} />
           <HudField label="run_id" value={exec?.run_id ?? DASH} />
           <HudField label="started_at" value={exec?.started_at ?? DASH} />
@@ -1558,6 +1694,22 @@ function SseDiagPanel({
           <HudField label="run_status" value={exec ? formatExecutionStatus(exec.status) : DASH} />
           <HudField label="run_error" value={exec?.error ?? DASH} />
           <HudField label="effective_params" value={effectiveParamsText} />
+          <HudField label="capability" value={engineMetadata?.capability_descriptor ?? exec?.capability_descriptor ?? DASH} />
+          <HudField
+            label="capability.required"
+            value={formatStringList(engineCapability?.required_inputs)}
+          />
+          <HudField
+            label="capability.optional"
+            value={formatStringList(engineCapability?.optional_inputs)}
+          />
+          <HudField
+            label="capability.unsupported"
+            value={formatStringList(engineCapability?.unsupported_conditions)}
+          />
+          <HudField label="degradation" value={formatDegradationSummary(degradationReport)} />
+          <HudField label="coverage" value={formatCoverageReport(coverageReport)} />
+          <HudField label="unavailable reasons" value={formatUnavailableReasons(unavailableReasons)} />
         </div>
         {recentStale.length > 0 && (
           <div style={{ display: 'grid', gap: 4 }}>
@@ -1573,6 +1725,12 @@ function SseDiagPanel({
         <details>
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Contract detail</summary>
           <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 10px' }}>
+            <HudField label="baseline_source_kind" value={summary.contract_detail.baseline_source_kind} />
+            <HudField label="baseline_resolved_source" value={summary.contract_detail.baseline_resolved_source} />
+            <HudField
+              label="baseline_annotation_origin"
+              value={summary.contract_detail.baseline_annotation_origin ?? DASH}
+            />
             <HudField label="baseline_profile" value={summary.contract_detail.baseline_profile} />
             <HudField label="override_profile" value={summary.contract_detail.override_profile} />
             <HudField label="comparison_scope" value={summary.contract_detail.comparison_scope} />

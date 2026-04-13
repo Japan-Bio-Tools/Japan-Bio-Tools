@@ -4,7 +4,13 @@ import type {
   ComparisonStatus,
   DiagnosisRecord,
   DiffRow,
+  EngineCapabilityReport,
+  EngineCoverageReport,
+  EngineDegradationReport,
   EngineExecutionRecord,
+  EngineUnavailableReason,
+  DerivedGeometryCarrier,
+  RawBackboneCarrier,
   SseComparisonSummary,
   SseEngineOutput,
   SseLabel,
@@ -13,6 +19,9 @@ import type {
 } from '../../domain/sse/types';
 
 export type DiagnosisContractContext = {
+  baseline_source_kind: string;
+  baseline_resolved_source: string;
+  baseline_annotation_origin?: string | null;
   baseline_profile: string;
   comparison_scope: string;
   chain_policy: string;
@@ -30,6 +39,8 @@ export type RunDiagnosisPipelineInput = {
   baseline_map: Map<string, SseLabel>;
   residue_keys: SseResidueKey[];
   residue_display_labels: Map<string, string>;
+  raw_backbone: RawBackboneCarrier;
+  derived_geometry?: DerivedGeometryCarrier | null;
   contract_context: DiagnosisContractContext;
   view_mode: SseViewMode;
   is_run_current?: (runId: string) => boolean;
@@ -47,6 +58,10 @@ export type RunDiagnosisPipelineResult = {
   comparison_summary: SseComparisonSummary;
   diagnosis_record: DiagnosisRecord;
   engine_execution_record: EngineExecutionRecord;
+  engine_capability: EngineCapabilityReport | null;
+  engine_degradation: EngineDegradationReport | null;
+  engine_coverage: EngineCoverageReport | null;
+  unavailable_reasons: EngineUnavailableReason[];
   stale_disposition: StaleDisposition;
   failed: boolean;
 };

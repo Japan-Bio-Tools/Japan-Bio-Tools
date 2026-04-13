@@ -1,6 +1,13 @@
 import { buildSseMappingResult } from '../../domain/sse/compare';
 import { resolveSseEngineDescriptor } from '../../domain/sse/engine';
-import type { EngineExecutionRecord } from '../../domain/sse/types';
+import type {
+  EngineCapabilityReport,
+  EngineCoverageReport,
+  EngineDegradationReport,
+  EngineExecutionRecord,
+  EngineUnavailableReason,
+  ResidueSseRecord,
+} from '../../domain/sse/types';
 import { buildComparisonSummary } from './buildComparisonSummary';
 import { buildDiffRows } from './buildDiffRows';
 import { buildEngineInput } from './buildEngineInput';
@@ -51,6 +58,10 @@ export async function runDiagnosisPipeline(
       diff_rows: [],
       failed: true,
       engine_execution_record: failedResolutionRecord,
+      engine_capability: null,
+      engine_degradation: null,
+      engine_coverage: null,
+      unavailable_reasons: [],
     });
   }
 
@@ -58,6 +69,8 @@ export async function runDiagnosisPipeline(
   try {
     const engine = resolution.descriptor.create(input.engine_params);
     const output = await engine.compute(engineInput);
+    const diagnostics = extractEngineDiagnostics(output);
+    const comparableResidues = toComparableResidues(output.residues);
     const completedRecord: EngineExecutionRecord = {
       ...runningRecord,
       status: 'completed',
@@ -67,8 +80,11 @@ export async function runDiagnosisPipeline(
       engine_version: output.metadata?.engine_version ?? null,
       engine_stage: output.metadata?.engine_stage ?? resolution.descriptor.engine_stage,
       effective_params: output.metadata?.effective_params ?? normalizedEngineParams,
+      capability_descriptor: output.metadata?.capability_descriptor ?? null,
+      coverage_report: diagnostics.engine_coverage,
+      degradation_report: diagnostics.engine_degradation,
     };
-    const mapping = buildSseMappingResult(input.baseline_map, output.residues);
+    const mapping = buildSseMappingResult(input.baseline_map, comparableResidues);
     const diffRows = buildDiffRows(mapping, input.residue_display_labels);
     return buildRunResult({
       input,
@@ -77,6 +93,7 @@ export async function runDiagnosisPipeline(
       diff_rows: diffRows,
       failed: false,
       engine_execution_record: completedRecord,
+      ...diagnostics,
     });
   } catch (error) {
     const failedExecutionRecord: EngineExecutionRecord = {
@@ -92,6 +109,10 @@ export async function runDiagnosisPipeline(
       diff_rows: [],
       failed: true,
       engine_execution_record: failedExecutionRecord,
+      engine_capability: null,
+      engine_degradation: null,
+      engine_coverage: null,
+      unavailable_reasons: [],
     });
   }
 }
@@ -103,6 +124,10 @@ function buildRunResult(args: {
   diff_rows: RunDiagnosisPipelineResult['diff_rows'];
   failed: boolean;
   engine_execution_record: EngineExecutionRecord;
+  engine_capability: EngineCapabilityReport | null;
+  engine_degradation: EngineDegradationReport | null;
+  engine_coverage: EngineCoverageReport | null;
+  unavailable_reasons: EngineUnavailableReason[];
 }): RunDiagnosisPipelineResult {
   const comparisonStatus = deriveComparisonStatus({
     baseline_map: args.input.baseline_map,
@@ -120,6 +145,10 @@ function buildRunResult(args: {
     view_mode: args.input.view_mode,
     contract_context: args.input.contract_context,
     engine_execution_record: args.engine_execution_record,
+    engine_capability: args.engine_capability,
+    engine_degradation: args.engine_degradation,
+    engine_coverage: args.engine_coverage,
+    unavailable_reasons: args.unavailable_reasons,
   });
 
   const staleDisposition = deriveStaleDisposition(args.input);
@@ -132,9 +161,70 @@ function buildRunResult(args: {
     comparison_summary: comparison.comparison_summary,
     diagnosis_record: comparison.diagnosis_record,
     engine_execution_record: args.engine_execution_record,
+    engine_capability: args.engine_capability,
+    engine_degradation: args.engine_degradation,
+    engine_coverage: args.engine_coverage,
+    unavailable_reasons: args.unavailable_reasons,
     stale_disposition: staleDisposition,
     failed: args.failed,
   };
+}
+
+function toComparableResidues(residues: ResidueSseRecord[]): ResidueSseRecord[] {
+  return residues.filter((residue) => residue.assignment_quality !== 'degraded');
+}
+
+function extractEngineDiagnostics(output: {
+  capability?: EngineCapabilityReport;
+  degradation?: EngineDegradationReport;
+  coverage?: EngineCoverageReport;
+  unavailable_reasons?: EngineUnavailableReason[];
+  metadata?: {
+    input_requirements: {
+      required_inputs: string[];
+      optional_inputs: string[];
+    };
+    coverage_report?: EngineCoverageReport;
+    degradation_report?: EngineDegradationReport;
+  };
+}): {
+  engine_capability: EngineCapabilityReport | null;
+  engine_degradation: EngineDegradationReport | null;
+  engine_coverage: EngineCoverageReport | null;
+  unavailable_reasons: EngineUnavailableReason[];
+} {
+  const engineCapability =
+    output.capability ??
+    (output.metadata
+      ? {
+          required_inputs: output.metadata.input_requirements.required_inputs,
+          optional_inputs: output.metadata.input_requirements.optional_inputs,
+          unsupported_conditions: [],
+        }
+      : null);
+  const engineCoverage = output.coverage ?? output.metadata?.coverage_report ?? null;
+  const engineDegradation = output.degradation ?? output.metadata?.degradation_report ?? null;
+  const unavailableReasons = normalizeUnavailableReasons(
+    output.unavailable_reasons ?? engineCoverage?.unavailable_reasons ?? []
+  );
+
+  return {
+    engine_capability: engineCapability,
+    engine_degradation: engineDegradation,
+    engine_coverage: engineCoverage,
+    unavailable_reasons: unavailableReasons,
+  };
+}
+
+function normalizeUnavailableReasons(
+  reasons: EngineUnavailableReason[]
+): EngineUnavailableReason[] {
+  const merged = new Map<string, number>();
+  for (const reason of reasons) {
+    if (!reason.reason || reason.count <= 0) continue;
+    merged.set(reason.reason, (merged.get(reason.reason) ?? 0) + reason.count);
+  }
+  return Array.from(merged.entries()).map(([reason, count]) => ({ reason, count }));
 }
 
 function deriveStaleDisposition(input: RunDiagnosisPipelineInput): StaleDisposition {

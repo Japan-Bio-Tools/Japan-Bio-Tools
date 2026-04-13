@@ -1,13 +1,13 @@
-# Repository Map
+# リポジトリマップ
 
-## Overview
+## 概要
 
 本リポジトリは npm workspaces を用いた **モノレポ構成**を採用する。
 各ツールは **GitHub Pages 上でサブパス配下に公開**され、ビルド成果物は `dist/` に統合される。
 
 ---
 
-## Top-level structure
+## トップレベル構成
 
 /
 ├─ apps/ # サブアプリ群（Vite + React）
@@ -19,12 +19,9 @@
 ├─ scripts/ # Pages向け統合ビルド等
 └─ .github/workflows/ # GitHub Actions
 
-yaml
-コードをコピーする
-
 ---
 
-## Apps
+## アプリ
 
 ### apps/portal
 - 入口ページ（各ツールへの導線）
@@ -33,7 +30,8 @@ yaml
 ### apps/sse-diag
 - SSE（二次構造）比較診断ツール
 - Mol* を SSOT とし、Baseline / Override を比較成立条件つきで診断する
-- 正本仕様は `docs/architecture.md`
+- 親正本は `docs/architecture.md`
+- 状態モデル、UI 契約、Diagnosis Pipeline、SSE Engine、Mol* 境界、ロードマップの詳細正本は `docs/architecture/` 配下の分割文書
 - 公開パス: `/Japan-Bio-Tools/sse-diag/`
 
 ### apps/tool-b
@@ -50,7 +48,7 @@ yaml
 
 ---
 
-## Notes
+## 注意点
 
 ### Vite `base`
 GitHub Pages 配下でアセット解決するため、各アプリは `base` を固定する。

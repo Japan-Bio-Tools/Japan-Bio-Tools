@@ -256,12 +256,13 @@ function buildOverrideSecondaryStructureForUnit(model: Model, ssOld: any, overri
   const n: number = residues?._rowCount ?? 0;
 
   const len = ssOld.type.length;
-  const type = new Uint32Array(len);
-  const key = new Int32Array(len);
+  // Start from baseline provider values and override only residues explicitly assigned by engine output.
+  const type = new Uint32Array(ssOld.type as ArrayLike<number>);
+  const key = new Int32Array(ssOld.key as ArrayLike<number>);
 
   const { helixType, sheetType } = pickRepresentativeTypes(ssOld, log);
 
-  let setH = 0, setE = 0, setC = 0, hit = 0, skippedChain = 0, skippedSeq = 0;
+  let setH = 0, setE = 0, setC = 0, keptBaseline = 0, hit = 0, skippedChain = 0, skippedSeq = 0;
 
   for (let ri = 0; ri < n; ri++) {
     const idx = ssOld.getIndex(ri as any as ResidueIndex) as number;
@@ -280,15 +281,17 @@ function buildOverrideSecondaryStructureForUnit(model: Model, ssOld: any, overri
 
     const k = residueKeyToString({ chainId, labelSeqId });
     const sse = override.get(k);
-    if (sse) hit++;
+    if (!sse) {
+      keptBaseline++;
+      continue;
+    }
+    hit++;
 
-    const v: SseLabel = sse ?? 'C';
-
-    if (v === 'H') {
+    if (sse === 'H') {
       type[idx] = helixType;
       key[idx] = 1;
       setH++;
-    } else if (v === 'E') {
+    } else if (sse === 'E') {
       type[idx] = sheetType;
       key[idx] = 2;
       setE++;
@@ -304,7 +307,7 @@ function buildOverrideSecondaryStructureForUnit(model: Model, ssOld: any, overri
     (ELEMENTS[2] as any).flags = sheetType;
   } catch {}
 
-  log?.('[SSE-Diag] unit override stats:', { modelResidues: n, ssLen: len, hit, skippedChain, skippedSeq, setH, setE, setC });
+  log?.('[SSE-Diag] unit override stats:', { modelResidues: n, ssLen: len, hit, keptBaseline, skippedChain, skippedSeq, setH, setE, setC });
 
   return SecondaryStructure(type as any, key as any, ELEMENTS as any, ssOld.getIndex as any);
 }
