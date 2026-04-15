@@ -186,8 +186,10 @@ export function runClassification(
     sourceDatabase === 'unknown' ? 'low' : deriveConfidenceLevel(recordTypeResult.recordType, metadata)
 
   let unknownReasonCode: UnknownReasonCode | null = recordTypeResult.unknownReason
-  if (sourceDatabase === 'unknown' && unknownReasonCode === null) {
-    unknownReasonCode = hasConflictingStrongProvenance(metadata) ? 'conflicting_evidence' : 'unresolved_provenance'
+  if (sourceDatabase === 'unknown' && hasConflictingStrongProvenance(metadata)) {
+    unknownReasonCode = 'conflicting_evidence'
+  } else if (sourceDatabase === 'unknown' && unknownReasonCode === null) {
+    unknownReasonCode = 'unresolved_provenance'
   }
 
   return {
