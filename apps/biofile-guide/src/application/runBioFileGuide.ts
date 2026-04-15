@@ -6,12 +6,14 @@ import { runClassification } from '../domain/classificationEngine'
 import type { BioFileEnvelope, ConfidenceLevel, ErrorCode, EvidenceItem, NormalizedMetadataDTO } from '../types/contracts'
 import { formatErrorEnvelope, formatSuccessEnvelope } from './resultFormatter'
 import { lookupIdentifierMetadata } from './metadataAdapterOrchestrator'
-import { MockMetadataAdapter } from '../infrastructure/adapters/mockMetadataAdapter'
 import type { MetadataAdapter } from '../infrastructure/adapters/metadataAdapter'
+import { createMetadataAdapters, type MetadataAdapterMode } from './metadataAdapterFactory'
 
 type RunRequest = {
   textInput: string
   file: File | null
+  adapterMode?: MetadataAdapterMode
+  adapters?: MetadataAdapter[]
 }
 
 function baseMetadataForError(): NormalizedMetadataDTO {
@@ -43,14 +45,6 @@ function fallbackErrorFacts(errorCode: ErrorCode): EvidenceItem[] {
 
 function ensureConfidenceLevel(level: ConfidenceLevel): ConfidenceLevel {
   return level
-}
-
-function createDefaultAdapters(): MetadataAdapter[] {
-  return [
-    new MockMetadataAdapter('RCSB', 'primary'),
-    new MockMetadataAdapter('PDBe', 'secondary'),
-    new MockMetadataAdapter('PDBj', 'tertiary'),
-  ]
 }
 
 function buildErrorEnvelope(
@@ -153,7 +147,7 @@ export async function runBioFileGuide(request: RunRequest): Promise<BioFileEnvel
     })
   }
 
-  const adapters = createDefaultAdapters()
+  const adapters = request.adapters ?? createMetadataAdapters(request.adapterMode)
   const lookup = await lookupIdentifierMetadata(normalizedInput, adapters)
   const classification = runClassification(normalizedInput, lookup.metadata, lookup.outcomes)
 

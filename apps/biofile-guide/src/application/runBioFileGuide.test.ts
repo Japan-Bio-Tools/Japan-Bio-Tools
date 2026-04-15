@@ -19,7 +19,7 @@ function expectError(envelope: BioFileEnvelope): asserts envelope is ErrorEnvelo
 
 describe('runBioFileGuide pipeline contracts', () => {
   it('keeps a verified PDB fixture as a success envelope', async () => {
-    const envelope = await runBioFileGuide({ textInput: '1crn', file: null })
+    const envelope = await runBioFileGuide({ textInput: '1crn', file: null, adapterMode: 'mock' })
 
     expectSuccess(envelope)
     expect(envelope.result.record_type).toBe('experimental_structure')
