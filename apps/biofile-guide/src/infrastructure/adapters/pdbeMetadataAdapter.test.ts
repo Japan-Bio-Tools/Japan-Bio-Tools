@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedIdentifierInput } from '../../application/pipelineTypes'
 import { getRecordedFixtureByCase } from '../../mocks/recordedMetadataFixtures'
 import { fetchFromRecordedCapture } from '../../test/recordedFixtureFetch'
+import { clearAdapterSessionLookupCache } from './adapterRequestSupport'
 import { PdbeMetadataAdapter } from './pdbeMetadataAdapter'
 
 function identifier(id = '1CRN'): NormalizedIdentifierInput {
@@ -15,6 +16,10 @@ function identifier(id = '1CRN'): NormalizedIdentifierInput {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+beforeEach(() => {
+  clearAdapterSessionLookupCache()
 })
 
 describe('PdbeMetadataAdapter', () => {
@@ -85,6 +90,7 @@ describe('PdbeMetadataAdapter', () => {
     vi.useFakeTimers()
     const adapter = new PdbeMetadataAdapter('secondary', {
       timeoutMs: 5,
+      maxRetries: 0,
       fetchFn: (_input, init) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => {

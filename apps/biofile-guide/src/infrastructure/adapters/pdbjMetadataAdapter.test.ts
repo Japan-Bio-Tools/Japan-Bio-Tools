@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedIdentifierInput } from '../../application/pipelineTypes'
 import { getRecordedFixtureByCase } from '../../mocks/recordedMetadataFixtures'
 import { fetchFromRecordedCapture } from '../../test/recordedFixtureFetch'
+import { clearAdapterSessionLookupCache } from './adapterRequestSupport'
 import { PdbjMetadataAdapter } from './pdbjMetadataAdapter'
 
 function identifier(id = '1CRN'): NormalizedIdentifierInput {
@@ -15,6 +16,10 @@ function identifier(id = '1CRN'): NormalizedIdentifierInput {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+beforeEach(() => {
+  clearAdapterSessionLookupCache()
 })
 
 describe('PdbjMetadataAdapter', () => {
@@ -104,6 +109,7 @@ describe('PdbjMetadataAdapter', () => {
     vi.useFakeTimers()
     const adapter = new PdbjMetadataAdapter('tertiary', {
       timeoutMs: 5,
+      maxRetries: 0,
       fetchFn: (_input, init) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => {

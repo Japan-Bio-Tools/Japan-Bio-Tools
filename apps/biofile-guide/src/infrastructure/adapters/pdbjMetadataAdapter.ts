@@ -9,13 +9,22 @@ import type {
   SourceRole,
 } from '../../types/contracts'
 import type { MetadataAdapter } from './metadataAdapter'
-
-type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+import {
+  buildSessionCacheKey,
+  fetchWithRetryPolicy,
+  readFromSessionCache,
+  type FetchFn,
+  writeToSessionCache,
+} from './adapterRequestSupport'
 
 export type PdbjMetadataAdapterOptions = {
   fetchFn?: FetchFn
   endpointBase?: string
   timeoutMs?: number
+  maxRetries?: number
+  retryDelayMs?: number
+  cacheTtlMs?: number
+  cacheNotFound?: boolean
 }
 
 type SearchRecordResult =
@@ -186,67 +195,97 @@ export class PdbjMetadataAdapter implements MetadataAdapter {
   private readonly fetchFn: FetchFn | null
   private readonly endpointBase: string
   private readonly timeoutMs: number
+  private readonly maxRetries: number
+  private readonly retryDelayMs: number
+  private readonly cacheTtlMs: number | undefined
+  private readonly cacheNotFound: boolean | undefined
 
   constructor(role: SourceRole = 'tertiary', options: PdbjMetadataAdapterOptions = {}) {
     this.role = role
     this.fetchFn = options.fetchFn ?? globalThis.fetch?.bind(globalThis) ?? null
     this.endpointBase = options.endpointBase ?? DEFAULT_ENDPOINT_BASE
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.maxRetries = options.maxRetries ?? 1
+    this.retryDelayMs = options.retryDelayMs ?? 0
+    this.cacheTtlMs = options.cacheTtlMs
+    this.cacheNotFound = options.cacheNotFound
   }
 
   async lookup(input: NormalizedIdentifierInput): Promise<AdapterLookupResult> {
+    const cacheKey = buildSessionCacheKey(
+      this.source,
+      this.role,
+      this.endpointBase,
+      input.canonicalIdentifier,
+    )
+    const cached = readFromSessionCache(cacheKey)
+    if (cached !== null) {
+      return cached
+    }
+
     if (this.fetchFn === null) {
       return this.unavailable('fetch is not available')
     }
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    const params = new URLSearchParams({
+      pdbid: input.canonicalIdentifier.toUpperCase(),
+      limit: '1',
+    })
+    const url = `${this.endpointBase}?${params.toString()}`
 
-    try {
-      const params = new URLSearchParams({
-        pdbid: input.canonicalIdentifier.toUpperCase(),
-        limit: '1',
-      })
-      const url = `${this.endpointBase}?${params.toString()}`
-      const response = await this.fetchFn(url, {
+    const fetchOutcome = await fetchWithRetryPolicy(
+      this.fetchFn,
+      url,
+      {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-        signal: controller.signal,
-      })
+      },
+      {
+        timeoutMs: this.timeoutMs,
+        maxRetries: this.maxRetries,
+        retryDelayMs: this.retryDelayMs,
+      },
+    )
 
-      if (response.status === 404) {
-        return this.notFound()
-      }
+    if (fetchOutcome.kind === 'timeout') {
+      return this.unavailable('PDBj request timed out')
+    }
 
-      if (!response.ok) {
-        return this.unavailable(`PDBj request failed with status ${response.status}`)
-      }
+    if (fetchOutcome.kind === 'network_error') {
+      return this.unavailable('PDBj request failed')
+    }
 
+    const response = fetchOutcome.response
+
+    if (response.status === 404) {
+      return this.cacheLookupResult(cacheKey, this.notFound())
+    }
+
+    if (!response.ok) {
+      return this.unavailable(`PDBj request failed with status ${response.status}`)
+    }
+
+    try {
       const body: unknown = await response.json()
       const extracted = extractSearchRecord(body)
       if (extracted.kind === 'not_found') {
-        return this.notFound()
+        return this.cacheLookupResult(cacheKey, this.notFound())
       }
       if (extracted.kind === 'malformed') {
         return this.unavailable('PDBj response was malformed')
       }
 
-      return {
+      return this.cacheLookupResult(cacheKey, {
         source: this.source,
         role: this.role,
         state: 'found',
         payload: buildPayload(input, extracted.record),
         detail: 'PDBj real adapter hit',
-      }
-    } catch (error) {
-      const detail = error instanceof DOMException && error.name === 'AbortError'
-        ? 'PDBj request timed out'
-        : 'PDBj request failed'
-      return this.unavailable(detail)
-    } finally {
-      clearTimeout(timeout)
+      })
+    } catch {
+      return this.unavailable('PDBj response was malformed')
     }
   }
 
@@ -269,5 +308,13 @@ export class PdbjMetadataAdapter implements MetadataAdapter {
       detail,
       safe_forward_links_available: true,
     }
+  }
+
+  private cacheLookupResult(cacheKey: string, result: AdapterLookupResult): AdapterLookupResult {
+    writeToSessionCache(cacheKey, result, {
+      cacheTtlMs: this.cacheTtlMs,
+      cacheNotFound: this.cacheNotFound,
+    })
+    return result
   }
 }

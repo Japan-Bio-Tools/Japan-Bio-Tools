@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedIdentifierInput } from '../../application/pipelineTypes'
 import { getRecordedFixtureByCase } from '../../mocks/recordedMetadataFixtures'
 import { fetchFromRecordedCapture } from '../../test/recordedFixtureFetch'
+import { clearAdapterSessionLookupCache } from './adapterRequestSupport'
 import { RcsbMetadataAdapter } from './rcsbMetadataAdapter'
 
 function identifier(id = '1CRN'): NormalizedIdentifierInput {
@@ -15,6 +16,10 @@ function identifier(id = '1CRN'): NormalizedIdentifierInput {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+beforeEach(() => {
+  clearAdapterSessionLookupCache()
 })
 
 describe('RcsbMetadataAdapter', () => {
@@ -67,24 +72,23 @@ describe('RcsbMetadataAdapter', () => {
   })
 
   it('returns unavailable for malformed payloads', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ rcsb_entry_info: {} }), { status: 200 }))
     const adapter = new RcsbMetadataAdapter('primary', {
-      fetchFn: fetchFromRecordedCapture({
-        kind: 'http_json',
-        status: 200,
-        body: { rcsb_entry_info: {} },
-      }),
+      fetchFn,
     })
 
     const result = await adapter.lookup(identifier())
 
     expect(result.state).toBe('unavailable')
     expect(result.payload).toBeNull()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
   it('returns unavailable on timeout', async () => {
     vi.useFakeTimers()
     const adapter = new RcsbMetadataAdapter('primary', {
       timeoutMs: 5,
+      maxRetries: 0,
       fetchFn: (_input, init) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => {
@@ -99,5 +103,120 @@ describe('RcsbMetadataAdapter', () => {
 
     expect(result.state).toBe('unavailable')
     expect(result.detail).toBe('RCSB request timed out')
+  })
+
+  it('retries once for network errors and succeeds on the second attempt', async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            entry: { id: '1CRN' },
+            exptl: [{ method: 'X-RAY DIFFRACTION' }],
+            rcsb_entry_info: {},
+          }),
+          { status: 200 },
+        ),
+      )
+
+    const adapter = new RcsbMetadataAdapter('primary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries once for 5xx responses and succeeds on the second attempt', async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            entry: { id: '1CRN' },
+            exptl: [{ method: 'X-RAY DIFFRACTION' }],
+            rcsb_entry_info: {},
+          }),
+          { status: 200 },
+        ),
+      )
+
+    const adapter = new RcsbMetadataAdapter('primary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry 404 responses', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }))
+    const adapter = new RcsbMetadataAdapter('primary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('9NF0'))
+
+    expect(result.state).toBe('not_found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches found responses in-session and avoids duplicate fetch', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          entry: { id: '1CRN' },
+          exptl: [{ method: 'X-RAY DIFFRACTION' }],
+          rcsb_entry_info: {},
+        }),
+        { status: 200 },
+      ),
+    )
+    const adapter = new RcsbMetadataAdapter('primary', { fetchFn })
+
+    const first = await adapter.lookup(identifier('1CRN'))
+    const second = await adapter.lookup(identifier('1CRN'))
+
+    expect(first.state).toBe('found')
+    expect(second.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches not_found responses in-session and avoids duplicate fetch', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }))
+    const adapter = new RcsbMetadataAdapter('primary', { fetchFn })
+
+    const first = await adapter.lookup(identifier('9NF0'))
+    const second = await adapter.lookup(identifier('9NF0'))
+
+    expect(first.state).toBe('not_found')
+    expect(second.state).toBe('not_found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not cache unavailable responses by default', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error('network down')
+    })
+    const adapter = new RcsbMetadataAdapter('primary', {
+      fetchFn,
+      maxRetries: 0,
+    })
+
+    const first = await adapter.lookup(identifier('2UNV'))
+    const second = await adapter.lookup(identifier('2UNV'))
+
+    expect(first.state).toBe('unavailable')
+    expect(second.state).toBe('unavailable')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 })

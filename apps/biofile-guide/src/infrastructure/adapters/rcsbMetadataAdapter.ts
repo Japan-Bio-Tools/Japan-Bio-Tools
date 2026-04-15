@@ -9,13 +9,22 @@ import type {
   SourceRole,
 } from '../../types/contracts'
 import type { MetadataAdapter } from './metadataAdapter'
-
-type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+import {
+  buildSessionCacheKey,
+  fetchWithRetryPolicy,
+  readFromSessionCache,
+  type FetchFn,
+  writeToSessionCache,
+} from './adapterRequestSupport'
 
 export type RcsbMetadataAdapterOptions = {
   fetchFn?: FetchFn
   endpointBase?: string
   timeoutMs?: number
+  maxRetries?: number
+  retryDelayMs?: number
+  cacheTtlMs?: number
+  cacheNotFound?: boolean
 }
 
 const DEFAULT_ENDPOINT_BASE = 'https://data.rcsb.org/rest/v1/core/entry'
@@ -158,46 +167,83 @@ export class RcsbMetadataAdapter implements MetadataAdapter {
   private readonly fetchFn: FetchFn | null
   private readonly endpointBase: string
   private readonly timeoutMs: number
+  private readonly maxRetries: number
+  private readonly retryDelayMs: number
+  private readonly cacheTtlMs: number | undefined
+  private readonly cacheNotFound: boolean | undefined
 
   constructor(role: SourceRole = 'primary', options: RcsbMetadataAdapterOptions = {}) {
     this.role = role
     this.fetchFn = options.fetchFn ?? globalThis.fetch?.bind(globalThis) ?? null
     this.endpointBase = options.endpointBase ?? DEFAULT_ENDPOINT_BASE
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.maxRetries = options.maxRetries ?? 1
+    this.retryDelayMs = options.retryDelayMs ?? 0
+    this.cacheTtlMs = options.cacheTtlMs
+    this.cacheNotFound = options.cacheNotFound
   }
 
   async lookup(input: NormalizedIdentifierInput): Promise<AdapterLookupResult> {
+    const cacheKey = buildSessionCacheKey(
+      this.source,
+      this.role,
+      this.endpointBase,
+      input.canonicalIdentifier,
+    )
+    const cached = readFromSessionCache(cacheKey)
+    if (cached !== null) {
+      return cached
+    }
+
     if (this.fetchFn === null) {
       return this.unavailable('fetch is not available')
     }
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    const url = `${this.endpointBase}/${encodeURIComponent(input.canonicalIdentifier)}`
 
-    try {
-      const url = `${this.endpointBase}/${encodeURIComponent(input.canonicalIdentifier)}`
-      const response = await this.fetchFn(url, {
+    const fetchOutcome = await fetchWithRetryPolicy(
+      this.fetchFn,
+      url,
+      {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-        signal: controller.signal,
-      })
+      },
+      {
+        timeoutMs: this.timeoutMs,
+        maxRetries: this.maxRetries,
+        retryDelayMs: this.retryDelayMs,
+      },
+    )
 
-      if (response.status === 404) {
-        return {
-          source: this.source,
-          role: this.role,
-          state: 'not_found',
-          payload: null,
-          detail: 'RCSB entry not found',
-        }
+    if (fetchOutcome.kind === 'timeout') {
+      return this.unavailable('RCSB request timed out')
+    }
+
+    if (fetchOutcome.kind === 'network_error') {
+      return this.unavailable('RCSB request failed')
+    }
+
+    const response = fetchOutcome.response
+
+    if (response.status === 404) {
+      const result: AdapterLookupResult = {
+        source: this.source,
+        role: this.role,
+        state: 'not_found',
+        payload: null,
+        detail: 'RCSB entry not found',
       }
+      this.cacheLookupResult(cacheKey, result)
+      return result
+    }
 
-      if (!response.ok) {
-        return this.unavailable(`RCSB request failed with status ${response.status}`)
-      }
+    if (!response.ok) {
+      return this.unavailable(`RCSB request failed with status ${response.status}`)
+    }
 
+    try {
       const body: unknown = await response.json()
       if (!isRecord(body)) {
         return this.unavailable('RCSB response was malformed')
@@ -208,20 +254,17 @@ export class RcsbMetadataAdapter implements MetadataAdapter {
         return this.unavailable('RCSB response missed entry identity')
       }
 
-      return {
+      const result: AdapterLookupResult = {
         source: this.source,
         role: this.role,
         state: 'found',
         payload,
         detail: 'RCSB real adapter hit',
       }
-    } catch (error) {
-      const detail = error instanceof DOMException && error.name === 'AbortError'
-        ? 'RCSB request timed out'
-        : 'RCSB request failed'
-      return this.unavailable(detail)
-    } finally {
-      clearTimeout(timeout)
+      this.cacheLookupResult(cacheKey, result)
+      return result
+    } catch {
+      return this.unavailable('RCSB response was malformed')
     }
   }
 
@@ -234,5 +277,12 @@ export class RcsbMetadataAdapter implements MetadataAdapter {
       detail,
       safe_forward_links_available: true,
     }
+  }
+
+  private cacheLookupResult(cacheKey: string, result: AdapterLookupResult): void {
+    writeToSessionCache(cacheKey, result, {
+      cacheTtlMs: this.cacheTtlMs,
+      cacheNotFound: this.cacheNotFound,
+    })
   }
 }
