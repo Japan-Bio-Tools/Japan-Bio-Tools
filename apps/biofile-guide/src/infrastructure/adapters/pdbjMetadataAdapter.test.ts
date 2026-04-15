@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedIdentifierInput } from '../../application/pipelineTypes'
 import { getRecordedFixtureByCase } from '../../mocks/recordedMetadataFixtures'
 import { fetchFromRecordedCapture } from '../../test/recordedFixtureFetch'
-import { RcsbMetadataAdapter } from './rcsbMetadataAdapter'
+import { PdbjMetadataAdapter } from './pdbjMetadataAdapter'
 
 function identifier(id = '1CRN'): NormalizedIdentifierInput {
   return {
@@ -17,16 +17,16 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('RcsbMetadataAdapter', () => {
-  it('normalizes a found RCSB entry into AdapterPayload', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'found')
+describe('PdbjMetadataAdapter', () => {
+  it('normalizes a found PDBj response into AdapterPayload', async () => {
+    const recorded = getRecordedFixtureByCase('PDBj', 'found')
     const fetchFn = fetchFromRecordedCapture(recorded.capture)
-    const adapter = new RcsbMetadataAdapter('primary', { fetchFn })
+    const adapter = new PdbjMetadataAdapter('tertiary', { fetchFn })
 
     const result = await adapter.lookup(identifier(recorded.identifier))
 
     expect(fetchFn).toHaveBeenCalledWith(
-      `https://data.rcsb.org/rest/v1/core/entry/${recorded.identifier}`,
+      `https://pdbj.org/rest/newweb/search/pdb?pdbid=${recorded.identifier.toUpperCase()}&limit=1`,
       expect.objectContaining({ method: 'GET' }),
     )
     expect(result.state).toBe('found')
@@ -34,32 +34,51 @@ describe('RcsbMetadataAdapter', () => {
   })
 
   it('returns not_found for a 404 response', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'not_found')
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const recorded = getRecordedFixtureByCase('PDBj', 'not_found')
+    const adapter = new PdbjMetadataAdapter('tertiary', {
       fetchFn: fetchFromRecordedCapture(recorded.capture),
     })
 
     const result = await adapter.lookup(identifier(recorded.identifier))
 
     expect(result).toMatchObject({
-      source: 'RCSB',
-      role: 'primary',
+      source: 'PDBj',
+      role: 'tertiary',
+      state: 'not_found',
+      payload: null,
+    })
+  })
+
+  it('returns not_found when search result is empty', async () => {
+    const adapter = new PdbjMetadataAdapter('tertiary', {
+      fetchFn: fetchFromRecordedCapture({
+        kind: 'http_json',
+        status: 200,
+        body: { results: [] },
+      }),
+    })
+
+    const result = await adapter.lookup(identifier('9ZZZ'))
+
+    expect(result).toMatchObject({
+      source: 'PDBj',
+      role: 'tertiary',
       state: 'not_found',
       payload: null,
     })
   })
 
   it('returns unavailable for network failure', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'unavailable')
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const recorded = getRecordedFixtureByCase('PDBj', 'unavailable')
+    const adapter = new PdbjMetadataAdapter('tertiary', {
       fetchFn: fetchFromRecordedCapture(recorded.capture),
     })
 
     const result = await adapter.lookup(identifier())
 
     expect(result).toMatchObject({
-      source: 'RCSB',
-      role: 'primary',
+      source: 'PDBj',
+      role: 'tertiary',
       state: 'unavailable',
       payload: null,
       safe_forward_links_available: true,
@@ -67,11 +86,11 @@ describe('RcsbMetadataAdapter', () => {
   })
 
   it('returns unavailable for malformed payloads', async () => {
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const adapter = new PdbjMetadataAdapter('tertiary', {
       fetchFn: fetchFromRecordedCapture({
         kind: 'http_json',
         status: 200,
-        body: { rcsb_entry_info: {} },
+        body: ['not a record'],
       }),
     })
 
@@ -83,7 +102,7 @@ describe('RcsbMetadataAdapter', () => {
 
   it('returns unavailable on timeout', async () => {
     vi.useFakeTimers()
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const adapter = new PdbjMetadataAdapter('tertiary', {
       timeoutMs: 5,
       fetchFn: (_input, init) =>
         new Promise((_resolve, reject) => {
@@ -98,6 +117,6 @@ describe('RcsbMetadataAdapter', () => {
     const result = await pending
 
     expect(result.state).toBe('unavailable')
-    expect(result.detail).toBe('RCSB request timed out')
+    expect(result.detail).toBe('PDBj request timed out')
   })
 })

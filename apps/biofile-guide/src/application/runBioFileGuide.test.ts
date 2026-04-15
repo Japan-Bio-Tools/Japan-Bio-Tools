@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BioFileEnvelope, ErrorEnvelope, SuccessEnvelope } from '../types/contracts'
 import { runBioFileGuide } from './runBioFileGuide'
 
@@ -16,6 +16,19 @@ function expectSuccess(envelope: BioFileEnvelope): asserts envelope is SuccessEn
 function expectError(envelope: BioFileEnvelope): asserts envelope is ErrorEnvelope {
   expect(envelope.status).toBe('error')
 }
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('runBioFileGuide pipeline contracts', () => {
   it('keeps a verified PDB fixture as a success envelope', async () => {
@@ -69,6 +82,63 @@ describe('runBioFileGuide pipeline contracts', () => {
     expect(envelope.error.error_code).toBe('external_metadata_unavailable')
     expect(envelope.error.recommended_next_step_code).toBe('read_beginner_guide')
     expect(envelope.error.next_links.length).toBeGreaterThan(0)
+  })
+
+  it('can run real_pdbe mode through the pipeline without real network access', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        '9tst': [
+          {
+            experimental_method: ['Electron microscopy'],
+            number_of_models: 1,
+            number_of_chains: 3,
+            number_of_entities: {
+              ligand: 0,
+              water: 0,
+            },
+          },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const envelope = await runBioFileGuide({ textInput: '9TST', file: null, adapterMode: 'real_pdbe' })
+
+    expectSuccess(envelope)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://www.ebi.ac.uk/pdbe/api/pdb/entry/summary/9tst',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(envelope.result.entry_resolution_status).toBe('verified')
+    expect(envelope.result.record_type).toBe('experimental_structure')
+    expect(envelope.result.source_database).toBe('PDB')
+  })
+
+  it('can run real_pdbj mode through the pipeline without real network access', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        results: [
+          {
+            pdbid: '9TST',
+            experiment_method: 'X-RAY DIFFRACTION',
+            model_count: 1,
+            chain_count: 2,
+          },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const envelope = await runBioFileGuide({ textInput: '9TST', file: null, adapterMode: 'real_pdbj' })
+
+    expectSuccess(envelope)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://pdbj.org/rest/newweb/search/pdb?pdbid=9TST&limit=1',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(envelope.result.entry_resolution_status).toBe('verified')
+    expect(envelope.result.record_type).toBe('experimental_structure')
+    expect(envelope.result.source_database).toBe('PDB')
   })
 
   it('does not provide remote canonical links for a local file without an ID', async () => {

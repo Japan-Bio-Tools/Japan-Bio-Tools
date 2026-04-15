@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedIdentifierInput } from '../../application/pipelineTypes'
 import { getRecordedFixtureByCase } from '../../mocks/recordedMetadataFixtures'
 import { fetchFromRecordedCapture } from '../../test/recordedFixtureFetch'
-import { RcsbMetadataAdapter } from './rcsbMetadataAdapter'
+import { PdbeMetadataAdapter } from './pdbeMetadataAdapter'
 
 function identifier(id = '1CRN'): NormalizedIdentifierInput {
   return {
@@ -17,16 +17,16 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('RcsbMetadataAdapter', () => {
-  it('normalizes a found RCSB entry into AdapterPayload', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'found')
+describe('PdbeMetadataAdapter', () => {
+  it('normalizes a found PDBe summary into AdapterPayload', async () => {
+    const recorded = getRecordedFixtureByCase('PDBe', 'found')
     const fetchFn = fetchFromRecordedCapture(recorded.capture)
-    const adapter = new RcsbMetadataAdapter('primary', { fetchFn })
+    const adapter = new PdbeMetadataAdapter('secondary', { fetchFn })
 
     const result = await adapter.lookup(identifier(recorded.identifier))
 
     expect(fetchFn).toHaveBeenCalledWith(
-      `https://data.rcsb.org/rest/v1/core/entry/${recorded.identifier}`,
+      `https://www.ebi.ac.uk/pdbe/api/pdb/entry/summary/${recorded.identifier.toLowerCase()}`,
       expect.objectContaining({ method: 'GET' }),
     )
     expect(result.state).toBe('found')
@@ -34,32 +34,32 @@ describe('RcsbMetadataAdapter', () => {
   })
 
   it('returns not_found for a 404 response', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'not_found')
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const recorded = getRecordedFixtureByCase('PDBe', 'not_found')
+    const adapter = new PdbeMetadataAdapter('secondary', {
       fetchFn: fetchFromRecordedCapture(recorded.capture),
     })
 
     const result = await adapter.lookup(identifier(recorded.identifier))
 
     expect(result).toMatchObject({
-      source: 'RCSB',
-      role: 'primary',
+      source: 'PDBe',
+      role: 'secondary',
       state: 'not_found',
       payload: null,
     })
   })
 
   it('returns unavailable for network failure', async () => {
-    const recorded = getRecordedFixtureByCase('RCSB', 'unavailable')
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const recorded = getRecordedFixtureByCase('PDBe', 'unavailable')
+    const adapter = new PdbeMetadataAdapter('secondary', {
       fetchFn: fetchFromRecordedCapture(recorded.capture),
     })
 
     const result = await adapter.lookup(identifier())
 
     expect(result).toMatchObject({
-      source: 'RCSB',
-      role: 'primary',
+      source: 'PDBe',
+      role: 'secondary',
       state: 'unavailable',
       payload: null,
       safe_forward_links_available: true,
@@ -67,11 +67,11 @@ describe('RcsbMetadataAdapter', () => {
   })
 
   it('returns unavailable for malformed payloads', async () => {
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const adapter = new PdbeMetadataAdapter('secondary', {
       fetchFn: fetchFromRecordedCapture({
         kind: 'http_json',
         status: 200,
-        body: { rcsb_entry_info: {} },
+        body: ['not keyed by entry id'],
       }),
     })
 
@@ -83,7 +83,7 @@ describe('RcsbMetadataAdapter', () => {
 
   it('returns unavailable on timeout', async () => {
     vi.useFakeTimers()
-    const adapter = new RcsbMetadataAdapter('primary', {
+    const adapter = new PdbeMetadataAdapter('secondary', {
       timeoutMs: 5,
       fetchFn: (_input, init) =>
         new Promise((_resolve, reject) => {
@@ -98,6 +98,6 @@ describe('RcsbMetadataAdapter', () => {
     const result = await pending
 
     expect(result.state).toBe('unavailable')
-    expect(result.detail).toBe('RCSB request timed out')
+    expect(result.detail).toBe('PDBe request timed out')
   })
 })

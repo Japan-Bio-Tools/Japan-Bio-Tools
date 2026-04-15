@@ -26,6 +26,7 @@
 * classification engine unit test
 * warning builder unit test
 * next link selector unit test
+* recorded fixture contract test
 * UI snapshot / render test
 
 ### 30-2. ゴールドセット
@@ -50,6 +51,8 @@
 * external metadata 一時障害ケース
 * API source conflict case
 * entry_not_found case
+
+provider adapter 系の回帰は recorded fixture を正本とし、CI 本線で live API を直叩きしない。
 
 ### 30-3. expected output 一致基準
 
