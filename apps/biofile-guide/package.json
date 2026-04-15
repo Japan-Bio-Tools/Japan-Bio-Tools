@@ -1,9 +1,8 @@
 {
-  "name": "tool-b",
+  "name": "biofile-guide",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

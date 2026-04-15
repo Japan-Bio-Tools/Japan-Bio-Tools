@@ -2,59 +2,50 @@
 
 ## 概要
 
-本リポジトリは npm workspaces を用いた **モノレポ構成**を採用する。
-各ツールは **GitHub Pages 上でサブパス配下に公開**され、ビルド成果物は `dist/` に統合される。
-
----
+本リポジトリは npm workspaces を用いたモノレポ構成です。
+現役公開導線は `portal` と `biofile-guide` に限定し、退役資産は `archive/` に分離しています。
 
 ## トップレベル構成
 
+```
 /
-├─ apps/ # サブアプリ群（Vite + React）
-│ ├─ portal/ # 入口（ポータル）
-│ ├─ sse-diag/ # SSE診断（Mol*統合の主戦場）
-│ └─ tool-b/ # 将来拡張用の実験ツール
-├─ packages/ # 将来の共通パッケージ置き場（必要になったら切り出す）
-├─ docs/ # プロジェクト共通ドキュメント
-├─ scripts/ # Pages向け統合ビルド等
-└─ .github/workflows/ # GitHub Actions
+├─ apps/
+│  ├─ portal/
+│  └─ biofile-guide/
+├─ packages/
+├─ docs/
+│  └─ biofile-guide/
+├─ scripts/
+├─ archive/
+│  ├─ apps/sse-diag/
+│  ├─ docs/sse-diag/
+│  └─ ci-repro-check/
+└─ .github/workflows/
+```
 
----
-
-## アプリ
+## 現役アプリ
 
 ### apps/portal
-- 入口ページ（各ツールへの導線）
-- 公開パス: `/Japan-Bio-Tools/`
+- 入口ページ（公開パス: `/Japan-Bio-Tools/`）
+- 現役導線を `biofile-guide` へ案内する
 
-### apps/sse-diag
-- SSE（二次構造）比較診断ツール
-- Mol* を SSOT とし、Baseline / Override を比較成立条件つきで診断する
-- 親正本は `docs/architecture.md`
-- 状態モデル、UI 契約、Diagnosis Pipeline、SSE Engine、Mol* 境界、ロードマップの詳細正本は `docs/architecture/` 配下の分割文書
-- 公開パス: `/Japan-Bio-Tools/sse-diag/`
+### apps/biofile-guide
+- 本命アプリ（準備中）
+- 公開パス: `/Japan-Bio-Tools/biofile-guide/`
 
-### apps/tool-b
-- 将来拡張用のサンプル／実験ツール
-- 公開パス: `/Japan-Bio-Tools/tool-b/`
+## Archive
 
----
+### archive/apps/sse-diag
+- SSE-Diag 本体（退役済み参照用）
+- root workspace / root scripts / Pages build の主経路には含めない
 
-## packages/（将来）
+### archive/docs/sse-diag
+- SSE-Diag の旧正本ドキュメント群（退役済み参照用）
 
-- `molstar-adapter`（planned）
-  - Mol*統合ロジックの共通化候補
-  - 初期段階では存在しない（必要になった時点で切り出す）
+### archive/ci-repro-check
+- 旧CI再現用スナップショット（退役済み）
 
----
+## Build / Deploy 対象
 
-## 注意点
-
-### Vite `base`
-GitHub Pages 配下でアセット解決するため、各アプリは `base` を固定する。
-
-- portal: `/Japan-Bio-Tools/`
-- sse-diag: `/Japan-Bio-Tools/sse-diag/`
-- tool-b: `/Japan-Bio-Tools/tool-b/`
-
-リポジトリ名を変更した場合は、各 app の `base` を合わせて更新する。
+- 対象: `apps/portal`, `apps/biofile-guide`
+- 非対象: `archive/` 配下全体
