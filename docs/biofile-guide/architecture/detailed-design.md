@@ -377,6 +377,8 @@ Secondary / Tertiary 失敗痕跡の evidence 生成ルールは [reason / evide
 * adapter mock または recorded fixture を使う
 * merge strategy / classification engine / warning builder / next link selector は mock 前提で再現可能でなければならない
 * 本番APIへの疎通確認は CI 本線ではなく、別の任意確認ジョブで行う
+* 任意疎通確認ジョブの第1弾は `.github/workflows/biofile-guide-live-check.yml` として分離運用する
+* 任意疎通確認ジョブの失敗は provider endpoint health のシグナルであり、本線の fixture 回帰失敗と混同しない
 
 ---
 

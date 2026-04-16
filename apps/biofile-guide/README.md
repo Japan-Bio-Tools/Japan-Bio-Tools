@@ -86,11 +86,36 @@ npm -w apps/biofile-guide run build
 npm -w apps/biofile-guide run test
 ```
 
+## Optional Live Check (non-blocking)
+
+live API 疎通確認は本線 CI と分離した任意運用です。  
+本線の lint / build / test は、これまでどおり recorded fixture / mock 前提で live API 非依存のままです。
+
+ローカル実行:
+
+```bash
+npm -w apps/biofile-guide run live-check
+```
+
+GitHub Actions 手動実行:
+
+- Actions で `BioFile Guide Optional Live API Check (non-blocking)` を選択
+- `Run workflow` で起動
+
+live check の最小確認内容:
+
+- RCSB / PDBe / PDBj それぞれで known ID `1CRN` が `success` になること
+- RCSB / PDBe / PDBj それぞれで unknown ID `0000` が `not_found` になること
+
+live check failure の意味:
+
+- provider endpoint 側の一時不調、ネットワーク不調、または応答形状変化の兆候
+- 本線の recorded fixture 回帰（lint/build/test）失敗と同義ではない
+
 ## 現時点で未実装のもの
 
 - Anonymous Telemetry（送信処理）
 - 永続キャッシュ（localStorage / IndexedDB / server cache）
 - 高度な retry policy（指数バックオフ、circuit breaker など）
-- live API の任意疎通確認ジョブ（本線CIとは分離）
 - Mol* / iCn3D の埋め込み統合（現在は外部遷移導線のみ）
 - gold-set 全面実行系

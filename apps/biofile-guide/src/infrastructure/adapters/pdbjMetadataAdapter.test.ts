@@ -23,6 +23,47 @@ beforeEach(() => {
 })
 
 describe('PdbjMetadataAdapter', () => {
+  it('normalizes a tuple-row PDBj response into AdapterPayload', async () => {
+    const adapter = new PdbjMetadataAdapter('tertiary', {
+      fetchFn: fetchFromRecordedCapture({
+        kind: 'http_json',
+        status: 200,
+        body: {
+          total: '1',
+          results: [
+            [
+              '1crn',
+              'title',
+              'authors',
+              'citation',
+              'journal',
+              1984,
+              '81',
+              '16593516',
+              '10.1073/pnas.81.19.6014',
+              357436800,
+              365126400,
+              1730246400,
+              'X-RAY DIFFRACTION',
+              1.5,
+              'CRAMBIN',
+            ],
+          ],
+        },
+      }),
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('found')
+    expect(result.payload).toMatchObject({
+      archive_exists: true,
+      experiment_method: 'X-RAY DIFFRACTION',
+      record_type_markers: ['explicit_exptl_method'],
+      provenance_markers: ['explicit_pdb_archive_provenance'],
+    })
+  })
+
   it('normalizes a found PDBj response into AdapterPayload', async () => {
     const recorded = getRecordedFixtureByCase('PDBj', 'found')
     const fetchFn = fetchFromRecordedCapture(recorded.capture)
@@ -59,7 +100,7 @@ describe('PdbjMetadataAdapter', () => {
       fetchFn: fetchFromRecordedCapture({
         kind: 'http_json',
         status: 200,
-        body: { results: [] },
+        body: { total: '0', results: [] },
       }),
     })
 
@@ -71,6 +112,22 @@ describe('PdbjMetadataAdapter', () => {
       state: 'not_found',
       payload: null,
     })
+  })
+
+  it('returns unavailable for malformed tuple rows', async () => {
+    const adapter = new PdbjMetadataAdapter('tertiary', {
+      fetchFn: fetchFromRecordedCapture({
+        kind: 'http_json',
+        status: 200,
+        body: { total: '1', results: [[]] },
+      }),
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('unavailable')
+    expect(result.payload).toBeNull()
+    expect(result.detail).toBe('PDBj response was malformed')
   })
 
   it('returns unavailable for network failure', async () => {

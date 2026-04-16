@@ -92,22 +92,40 @@ function firstStringFromRecord(record: Record<string, unknown>, keys: string[]):
   return null
 }
 
-function firstArrayRecord(
-  source: Record<string, unknown>,
-  keys: string[],
-): SearchRecordResult {
-  for (const key of keys) {
-    const value = source[key]
-    if (!Array.isArray(value)) {
-      continue
-    }
-    if (value.length === 0) {
-      return { kind: 'not_found' }
-    }
-    if (!isRecord(value[0])) {
-      return { kind: 'malformed' }
-    }
-    return { kind: 'found', record: value[0] }
+const PDBJ_ROW_ENTRY_ID_INDEX = 0
+const PDBJ_ROW_EXPERIMENT_METHOD_INDEX = 12
+
+function toRecordFromPdbjRow(row: unknown[]): Record<string, unknown> | null {
+  const entryId = firstStringFromValue(row[PDBJ_ROW_ENTRY_ID_INDEX])
+  if (entryId === null) {
+    return null
+  }
+
+  const experimentMethod = firstStringFromValue(row[PDBJ_ROW_EXPERIMENT_METHOD_INDEX])
+  const record: Record<string, unknown> = {
+    entry_id: entryId,
+  }
+  if (experimentMethod !== null) {
+    record.experimental_method = experimentMethod
+  }
+  return record
+}
+
+function parseArrayBasedSearchResult(value: unknown): SearchRecordResult {
+  if (!Array.isArray(value)) {
+    return { kind: 'malformed' }
+  }
+  if (value.length === 0) {
+    return { kind: 'not_found' }
+  }
+
+  const first = value[0]
+  if (isRecord(first)) {
+    return { kind: 'found', record: first }
+  }
+  if (Array.isArray(first)) {
+    const record = toRecordFromPdbjRow(first)
+    return record === null ? { kind: 'malformed' } : { kind: 'found', record }
   }
   return { kind: 'malformed' }
 }
@@ -122,9 +140,16 @@ function extractSearchRecord(body: unknown): SearchRecordResult {
     return { kind: 'not_found' }
   }
 
-  const fromArray = firstArrayRecord(body, ['results', 'data', 'rows', 'list'])
-  if (fromArray.kind !== 'malformed') {
-    return fromArray
+  for (const key of ['results', 'data', 'rows', 'list']) {
+    if (!(key in body)) {
+      continue
+    }
+
+    const fromArray = parseArrayBasedSearchResult(body[key])
+    if (fromArray.kind !== 'malformed') {
+      return fromArray
+    }
+    return { kind: 'malformed' }
   }
 
   if (isRecord(body.entry)) {

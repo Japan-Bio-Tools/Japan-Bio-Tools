@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "live-check": "esbuild scripts/liveProviderCheck.ts --platform=node --format=esm --bundle --log-level=error --outfile=dist/live-check/liveProviderCheck.mjs && node dist/live-check/liveProviderCheck.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
