@@ -26,12 +26,42 @@ function renderExternalBadge(isExternal: boolean): string {
 
 function renderEntryResolutionNote(status: SuccessEnvelope['result']['entry_resolution_status']): string {
   if (status === 'verified') {
-    return 'entry_resolution_status=verified のため、この識別子は公式APIで存在確認できています。'
+    return 'entry_resolution_status=verified のため、この識別子は公式APIで存在確認済みです。'
   }
   if (status === 'not_found') {
-    return 'entry_resolution_status=not_found のため、形式は妥当ですが該当エントリは確認できていません。'
+    return 'entry_resolution_status=not_found のため、入力形式は妥当ですが該当エントリの存在は確認できていません。'
   }
-  return 'entry_resolution_status=unresolved のため、存在可否は断定できません。'
+  return 'entry_resolution_status=unresolved のため、存在可否はまだ断定できません。'
+}
+
+function renderCompatibilitySummary(
+  compatibility: SuccessEnvelope['result']['legacy_pdb_compatibility'],
+): string {
+  if (compatibility === 'compatible') {
+    return '現時点で旧PDB形式への明確な互換性リスクは検出されていません。'
+  }
+  if (compatibility === 'caution') {
+    return '旧PDB形式へ落とすと情報が欠ける可能性があります。最初に原典情報を確認してください。'
+  }
+  if (compatibility === 'incompatible') {
+    return '旧PDB形式では表現しきれない可能性が高いため、mmCIF前提で確認してください。'
+  }
+  return '旧PDB互換性を断定できません。原典情報を先に確認する進め方が安全です。'
+}
+
+function renderCompatibilityClass(
+  compatibility: SuccessEnvelope['result']['legacy_pdb_compatibility'],
+): string {
+  if (compatibility === 'compatible') {
+    return 'noticeInfo'
+  }
+  if (compatibility === 'caution') {
+    return 'noticeCaution'
+  }
+  if (compatibility === 'incompatible') {
+    return 'noticeErrorLike'
+  }
+  return 'noticeUnknown'
 }
 
 function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
@@ -39,6 +69,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
   const hasUnknown = result.record_type === 'unknown' || result.source_database === 'unknown'
   const prioritizedWarnings = result.beginner_warning.slice(0, 3)
   const remainingWarnings = result.beginner_warning.slice(3)
+  const warningCodes = result.warning_codes.length > 0 ? result.warning_codes.join(', ') : 'none'
 
   return (
     <section className="resultPanel">
@@ -55,43 +86,52 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
 
       {hasUnknown ? (
         <div className="notice noticeUnknown">
-          <strong>unknown を含む結果です。</strong>
-          <p>断定できない理由: {formatNullable(result.unknown_reason_code)}</p>
+          <strong>unknown は失敗ではありません。</strong>
+          <p>根拠不足または根拠競合のため断定を保留しています。確認できた情報と次の一手で前進できます。</p>
+          <p className="nextStepCode secondaryCode"><span>unknown_reason_code: </span><code>{formatNullable(result.unknown_reason_code)}</code></p>
         </div>
       ) : null}
 
       <p className="identifierNote">
-        `resolved_identifier` は URL 組み立て用の正規化IDであり、存在確認済みを意味しません。
+        <strong>注意:</strong> `resolved_identifier` は URL 組み立て用の正規化IDであり、存在確認済みを意味しません。
       </p>
       <p className="identifierNote">{renderEntryResolutionNote(result.entry_resolution_status)}</p>
 
       <div className="cardGrid">
         <article className="card">
-          <h3>カード1: この入力は何者か</h3>
-          <dl className="detailList">
-            <div><dt>record_type</dt><dd>{result.record_type}</dd></div>
-            <div><dt>resolved_format</dt><dd>{result.resolved_format}</dd></div>
-            <div><dt>source_database</dt><dd>{result.source_database}</dd></div>
-            <div><dt>experiment_method</dt><dd>{formatNullable(result.experiment_method)}</dd></div>
-            <div><dt>confidence</dt><dd>{result.confidence.level}</dd></div>
-            <div><dt>resolved_identifier</dt><dd>{formatNullable(result.resolved_identifier)}</dd></div>
+          <h3>1. これは何の構造か</h3>
+          <p className="cardLead">構造タイプと由来を先に確認します。断定できない場合は unknown のまま表示します。</p>
+          <dl className="detailList detailListPrimary">
+            <div><dt>構造タイプ</dt><dd>{result.record_type}</dd></div>
+            <div><dt>由来データベース</dt><dd>{result.source_database}</dd></div>
+            <div><dt>フォーマット</dt><dd>{result.resolved_format}</dd></div>
+            <div><dt>信頼度（分類）</dt><dd>{result.confidence.level}</dd></div>
           </dl>
+          <details className="technicalDetails">
+            <summary>技術情報（raw contract）</summary>
+            <dl className="detailList">
+              <div><dt>record_type</dt><dd>{result.record_type}</dd></div>
+              <div><dt>resolved_format</dt><dd>{result.resolved_format}</dd></div>
+              <div><dt>source_database</dt><dd>{result.source_database}</dd></div>
+              <div><dt>experiment_method</dt><dd>{formatNullable(result.experiment_method)}</dd></div>
+              <div><dt>confidence.scope</dt><dd>{result.confidence.scope}</dd></div>
+              <div><dt>confidence.level</dt><dd>{result.confidence.level}</dd></div>
+              <div><dt>resolved_identifier</dt><dd>{formatNullable(result.resolved_identifier)}</dd></div>
+            </dl>
+          </details>
         </article>
 
         <article className="card">
-          <h3>カード2: 最初に気をつけること</h3>
-          <dl className="detailList">
-            <div><dt>legacy_pdb_compatibility</dt><dd>{result.legacy_pdb_compatibility}</dd></div>
-            <div><dt>legacy_pdb_reason_text</dt><dd>{formatNullable(result.legacy_pdb_reason_text)}</dd></div>
-            <div><dt>model_count</dt><dd>{formatNullable(result.model_count)}</dd></div>
-            <div><dt>chain_count</dt><dd>{formatNullable(result.chain_count)}</dd></div>
-            <div><dt>ligand_status</dt><dd>{result.ligand_status}</dd></div>
-            <div><dt>water_status</dt><dd>{result.water_status}</dd></div>
-          </dl>
+          <h3>2. まず気をつけること</h3>
+          <p className="cardLead">注意点は上から優先です。まず先頭3件を確認してください。</p>
+          <div className={`notice noticeCompact ${renderCompatibilityClass(result.legacy_pdb_compatibility)}`}>
+            <strong>互換性メモ</strong>
+            <p>{renderCompatibilitySummary(result.legacy_pdb_compatibility)}</p>
+          </div>
           <div className="warningBlock">
-            <h4>beginner_warning（priority順）</h4>
+            <h4>優先表示（先頭3件）</h4>
             <ul>
-              {prioritizedWarnings.length === 0 ? <li>なし</li> : null}
+              {prioritizedWarnings.length === 0 ? <li>現在、優先表示すべき warning はありません。</li> : null}
               {prioritizedWarnings.map((warning, index) => (
                 <li key={`${warning}-${index}`}>{warning}</li>
               ))}
@@ -107,31 +147,53 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
               </details>
             ) : null}
           </div>
+          <details className="technicalDetails">
+            <summary>技術情報（raw contract）</summary>
+            <dl className="detailList">
+              <div><dt>legacy_pdb_compatibility</dt><dd>{result.legacy_pdb_compatibility}</dd></div>
+              <div><dt>legacy_pdb_reason_text</dt><dd>{formatNullable(result.legacy_pdb_reason_text)}</dd></div>
+              <div><dt>model_count</dt><dd>{formatNullable(result.model_count)}</dd></div>
+              <div><dt>chain_count</dt><dd>{formatNullable(result.chain_count)}</dd></div>
+              <div><dt>ligand_status</dt><dd>{result.ligand_status}</dd></div>
+              <div><dt>water_status</dt><dd>{result.water_status}</dd></div>
+            </dl>
+            <p className="nextStepCode secondaryCode"><span>warning_codes: </span><code>{warningCodes}</code></p>
+          </details>
         </article>
 
         <article className="card">
-          <h3>カード3: 次に開く場所</h3>
-          <p className="nextStepCode">{result.recommended_next_step_code}</p>
-          <p>{result.recommended_next_step}</p>
+          <h3>3. 次にどこを見るか</h3>
+          <p className="cardLead">迷ったら、まずこの一手から進めてください。</p>
+          <div className="nextActionHero">
+            <p className="nextActionLabel">おすすめの最初の行動</p>
+            <p className="nextActionText">{result.recommended_next_step}</p>
+          </div>
+          <p className="linkIntro">以下は allowlist で生成された導線です。外部遷移は「外部サイト」で明示します。</p>
           <ul className="linkList">
             {result.next_links.map((link) => {
               const external = isExternalDestination(link.destination_type)
               return (
                 <li key={`${link.destination_type}:${link.href}`}>
-                  <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
-                    {link.label}
-                  </a>
-                  <span className="linkBadge">{renderExternalBadge(external)}</span>
+                  <div className="linkLabelRow">
+                    <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                      {link.label}
+                    </a>
+                    {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                  </div>
                   <small>{link.reason}</small>
                 </li>
               )
             })}
           </ul>
+          <p className="nextStepCode secondaryCode">
+            <span>recommended_next_step_code: </span>
+            <code>{result.recommended_next_step_code}</code>
+          </p>
         </article>
       </div>
 
       <div className="evidenceBlock">
-        <h3>evidence</h3>
+        <h3>判定に使った根拠（evidence）</h3>
         <ul>
           {result.evidence.map((item) => (
             <li key={`${item.code}:${item.detail}`}>
@@ -150,44 +212,64 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
   return (
     <section className="resultPanel">
       <header className="resultHeader">
-        <h2>エラー結果</h2>
+        <h2>処理を完了できませんでした</h2>
         <span className={`statusPill statusError`}>error</span>
       </header>
-      <div className="errorSummary">
-        <p><strong>{error.error_code}</strong></p>
-        <p>{error.message}</p>
-        <p>{error.reason}</p>
-      </div>
-      <article className="card">
-        <h3>次の一手</h3>
-        <p className="nextStepCode">{error.recommended_next_step_code}</p>
-        <p>{error.recommended_next_step}</p>
-        <ul className="linkList">
-          {error.next_links.map((link) => {
-            const external = isExternalDestination(link.destination_type)
-            return (
-              <li key={`${link.destination_type}:${link.href}`}>
-                <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
-                  {link.label}
-                </a>
-                <span className="linkBadge">{renderExternalBadge(external)}</span>
-                <small>{link.reason}</small>
+      <p className="cardLead">error は処理失敗ですが、次に進むための一手と導線は必ず残しています。</p>
+
+      <div className="cardGrid">
+        <article className="card">
+          <h3>1. 何が起きたか</h3>
+          <p>{error.message}</p>
+          <p>{error.reason}</p>
+          <p className="nextStepCode secondaryCode">
+            <span>error_code: </span>
+            <code>{error.error_code}</code>
+          </p>
+        </article>
+
+        <article className="card">
+          <h3>2. 次の一手</h3>
+          <p className="cardLead">まず下の行動を実行してください。</p>
+          <div className="nextActionHero">
+            <p className="nextActionLabel">おすすめの最初の行動</p>
+            <p className="nextActionText">{error.recommended_next_step}</p>
+          </div>
+          <ul className="linkList">
+            {error.next_links.map((link) => {
+              const external = isExternalDestination(link.destination_type)
+              return (
+                <li key={`${link.destination_type}:${link.href}`}>
+                  <div className="linkLabelRow">
+                    <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                      {link.label}
+                    </a>
+                    {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                  </div>
+                  <small>{link.reason}</small>
+                </li>
+              )
+            })}
+          </ul>
+          <p className="nextStepCode secondaryCode">
+            <span>recommended_next_step_code: </span>
+            <code>{error.recommended_next_step_code}</code>
+          </p>
+        </article>
+
+        <article className="card">
+          <h3>3. 確認できた事実</h3>
+          <p className="cardLead">取得できた根拠のみを表示します。</p>
+          <ul>
+            {error.confirmed_facts.length === 0 ? <li>なし</li> : null}
+            {error.confirmed_facts.map((fact) => (
+              <li key={`${fact.code}:${fact.detail}`}>
+                <code>{fact.code}</code> - {fact.detail}
               </li>
-            )
-          })}
-        </ul>
-      </article>
-      <article className="card">
-        <h3>confirmed_facts</h3>
-        <ul>
-          {error.confirmed_facts.length === 0 ? <li>なし</li> : null}
-          {error.confirmed_facts.map((fact) => (
-            <li key={`${fact.code}:${fact.detail}`}>
-              <code>{fact.code}</code> - {fact.detail}
-            </li>
-          ))}
-        </ul>
-      </article>
+            ))}
+          </ul>
+        </article>
+      </div>
     </section>
   )
 }

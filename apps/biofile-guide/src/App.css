@@ -136,9 +136,33 @@
   margin-bottom: 10px;
 }
 
+.notice p {
+  margin: 6px 0 0;
+}
+
 .noticeUnknown {
   background: #fff7ed;
   border: 1px solid #fdba74;
+}
+
+.noticeInfo {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+}
+
+.noticeCaution {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+}
+
+.noticeErrorLike {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+}
+
+.noticeCompact {
+  margin-top: 8px;
+  margin-bottom: 12px;
 }
 
 .identifierNote {
@@ -165,6 +189,12 @@
   font-size: 16px;
 }
 
+.cardLead {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 14px;
+}
+
 .detailList {
   margin: 0;
   display: grid;
@@ -184,6 +214,10 @@
 .detailList dd {
   margin: 0;
   font-weight: 600;
+}
+
+.detailListPrimary dd {
+  font-size: 15px;
 }
 
 .warningBlock h4 {
@@ -216,9 +250,64 @@
   margin: 0 0 8px;
 }
 
+.secondaryCode {
+  color: #475569;
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+
+.technicalDetails {
+  margin-top: 10px;
+}
+
+.technicalDetails summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+}
+
+.technicalDetails[open] summary {
+  margin-bottom: 8px;
+}
+
+.nextActionHero {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.nextActionLabel {
+  margin: 0;
+  font-size: 12px;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.nextActionText {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.linkIntro {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 13px;
+}
+
 .linkList li {
   display: grid;
   gap: 3px;
+}
+
+.linkLabelRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
 }
 
 .linkBadge {
