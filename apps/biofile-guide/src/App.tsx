@@ -1,8 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { runBioFileGuide } from './application/runBioFileGuide'
 import { isExternalDestination } from './domain/nextLinkSelector'
 import type { BioFileEnvelope, ErrorEnvelope, SuccessEnvelope } from './types/contracts'
+import {
+  emitAnonymousTelemetryEvent,
+  mapLinkTelemetryEventCode,
+  type AnonymousTelemetryEventCode,
+} from './telemetry/anonymousTelemetry'
 
 type SampleInput = {
   label: string
@@ -32,6 +37,22 @@ function renderEntryResolutionNote(status: SuccessEnvelope['result']['entry_reso
     return 'entry_resolution_status=not_found のため、入力形式は妥当ですが該当エントリの存在は確認できていません。'
   }
   return 'entry_resolution_status=unresolved のため、存在可否はまだ断定できません。'
+}
+
+type TelemetryLink = Pick<SuccessEnvelope['result']['next_links'][number], 'destination_type' | 'href'>
+
+function emitTelemetrySafely(eventCode: AnonymousTelemetryEventCode): void {
+  void emitAnonymousTelemetryEvent(eventCode).catch(() => undefined)
+}
+
+function trackLinkTelemetry(link: TelemetryLink, isRecommendedAction: boolean): void {
+  if (isRecommendedAction) {
+    emitTelemetrySafely('click_recommended_next_step')
+  }
+  const linkEventCode = mapLinkTelemetryEventCode(link)
+  if (linkEventCode !== null) {
+    emitTelemetrySafely(linkEventCode)
+  }
 }
 
 const RECORD_TYPE_LABELS: Record<string, string> = {
@@ -245,7 +266,12 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
                 return (
                   <li key={`${primaryNextLink.destination_type}:${primaryNextLink.href}`}>
                     <div className="linkLabelRow">
-                      <a href={primaryNextLink.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                      <a
+                        href={primaryNextLink.href}
+                        target={external ? '_blank' : undefined}
+                        rel={external ? 'noreferrer' : undefined}
+                        onClick={() => trackLinkTelemetry(primaryNextLink, true)}
+                      >
                         {primaryNextLink.label}
                       </a>
                       {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
@@ -265,7 +291,12 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
                   return (
                     <li key={`${link.destination_type}:${link.href}`}>
                       <div className="linkLabelRow">
-                        <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                        <a
+                          href={link.href}
+                          target={external ? '_blank' : undefined}
+                          rel={external ? 'noreferrer' : undefined}
+                          onClick={() => trackLinkTelemetry(link, false)}
+                        >
                           {link.label}
                         </a>
                         {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
@@ -340,7 +371,12 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
                 return (
                   <li key={`${primaryNextLink.destination_type}:${primaryNextLink.href}`}>
                     <div className="linkLabelRow">
-                      <a href={primaryNextLink.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                      <a
+                        href={primaryNextLink.href}
+                        target={external ? '_blank' : undefined}
+                        rel={external ? 'noreferrer' : undefined}
+                        onClick={() => trackLinkTelemetry(primaryNextLink, true)}
+                      >
                         {primaryNextLink.label}
                       </a>
                       {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
@@ -360,7 +396,12 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
                   return (
                     <li key={`${link.destination_type}:${link.href}`}>
                       <div className="linkLabelRow">
-                        <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                        <a
+                          href={link.href}
+                          target={external ? '_blank' : undefined}
+                          rel={external ? 'noreferrer' : undefined}
+                          onClick={() => trackLinkTelemetry(link, false)}
+                        >
                           {link.label}
                         </a>
                         {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
@@ -410,6 +451,24 @@ export default function App(): JSX.Element {
     }
     return textInput.trim().length > 0 ? `入力ID: ${textInput.trim()}` : '未入力'
   }, [selectedFile, textInput])
+
+  useEffect(() => {
+    if (result === null) {
+      return
+    }
+    if (result.status === 'success') {
+      const hasUnknown = result.result.record_type === 'unknown' || result.result.source_database === 'unknown'
+      emitTelemetrySafely(hasUnknown ? 'result_unknown_rendered' : 'result_rendered')
+      return
+    }
+    if (result.error.error_code === 'parse_failed') {
+      emitTelemetrySafely('error_parse_failed')
+      return
+    }
+    if (result.error.error_code === 'invalid_identifier') {
+      emitTelemetrySafely('error_invalid_identifier')
+    }
+  }, [result])
 
   const run = async (): Promise<void> => {
     setIsRunning(true)

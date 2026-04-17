@@ -34,4 +34,17 @@ jobs:
           echo "Failures indicate live endpoint health issues, not recorded-fixture regression failures." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run live provider check (RCSB / PDBe / PDBj)
-        run: npm -w apps/biofile-guide run live-check
+        run: |
+          set -o pipefail
+          npm -w apps/biofile-guide run live-check | tee live-check-output.txt
+
+      - name: Append provider table to summary
+        if: always()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Live Provider Results" >> "$GITHUB_STEP_SUMMARY"
+          if grep -qE '^\| ' live-check-output.txt; then
+            grep -E '^\| ' live-check-output.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_Provider table was not generated. Check job logs._" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -106,4 +106,134 @@ describe('PdbeMetadataAdapter', () => {
     expect(result.state).toBe('unavailable')
     expect(result.detail).toBe('PDBe request timed out')
   })
+
+  it('retries once for network errors and succeeds on the second attempt', async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            '1crn': [
+              {
+                experimental_method: ['X-ray diffraction'],
+                number_of_models: 1,
+                number_of_chains: 1,
+                number_of_entities: { ligand: 0, water: 1 },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+
+    const adapter = new PdbeMetadataAdapter('secondary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries once for 5xx responses and succeeds on the second attempt', async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            '1crn': [
+              {
+                experimental_method: ['X-ray diffraction'],
+                number_of_models: 1,
+                number_of_chains: 1,
+                number_of_entities: { ligand: 0, water: 1 },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+
+    const adapter = new PdbeMetadataAdapter('secondary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('1CRN'))
+
+    expect(result.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry 404 responses', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }))
+    const adapter = new PdbeMetadataAdapter('secondary', {
+      fetchFn,
+      maxRetries: 1,
+    })
+
+    const result = await adapter.lookup(identifier('9NF0'))
+
+    expect(result.state).toBe('not_found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches found responses in-session and avoids duplicate fetch', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          '1crn': [
+            {
+              experimental_method: ['X-ray diffraction'],
+              number_of_models: 1,
+              number_of_chains: 1,
+              number_of_entities: { ligand: 0, water: 1 },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    const adapter = new PdbeMetadataAdapter('secondary', { fetchFn })
+
+    const first = await adapter.lookup(identifier('1CRN'))
+    const second = await adapter.lookup(identifier('1CRN'))
+
+    expect(first.state).toBe('found')
+    expect(second.state).toBe('found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches not_found responses in-session and avoids duplicate fetch', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }))
+    const adapter = new PdbeMetadataAdapter('secondary', { fetchFn })
+
+    const first = await adapter.lookup(identifier('9NF0'))
+    const second = await adapter.lookup(identifier('9NF0'))
+
+    expect(first.state).toBe('not_found')
+    expect(second.state).toBe('not_found')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not cache unavailable responses by default', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error('network down')
+    })
+    const adapter = new PdbeMetadataAdapter('secondary', {
+      fetchFn,
+      maxRetries: 0,
+    })
+
+    const first = await adapter.lookup(identifier('2UNV'))
+    const second = await adapter.lookup(identifier('2UNV'))
+
+    expect(first.state).toBe('unavailable')
+    expect(second.state).toBe('unavailable')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
 })
