@@ -1,9 +1,11 @@
+@import "../../shared/styles/design-tokens.css";
+
 :root {
-  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-  line-height: 1.5;
+  font-family: var(--font-family-jp);
+  line-height: var(--line-height-default);
   font-weight: 400;
-  color: #0f172a;
-  background-color: #f1f5f9;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -20,12 +22,14 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--color-bg-canvas);
+  color: var(--color-text-primary);
 }
 
 a {
-  color: #0f3e8b;
+  color: var(--color-link);
 }
 
 a:hover {
-  color: #0b2f6a;
+  color: var(--color-link-hover);
 }

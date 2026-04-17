@@ -168,7 +168,10 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
   return (
     <section className="resultPanel">
       <header className="resultHeader">
-        <h2>判定結果</h2>
+        <div className="resultHeaderText">
+          <p className="typeEnglishLabel resultHeaderEnglish">Result</p>
+          <h2 className="typePageHeading">判定結果</h2>
+        </div>
         <span className={`statusPill statusSuccess`}>success</span>
       </header>
 
@@ -192,7 +195,8 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
 
       <div className="cardGrid">
         <article className="card">
-          <h3>1. これは何の構造か</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Identity</p>
+          <h3 className="typeSectionHeading">1. これは何の構造か</h3>
           <p className="cardLead">構造タイプと由来を先に確認します。断定できない場合は unknown のまま表示します。</p>
           <div className="primaryMeaningBlock">
             <p className="primaryMeaningLabel">判定の要点</p>
@@ -221,7 +225,8 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
         </article>
 
         <article className="card">
-          <h3>2. まず気をつけること</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Cautions</p>
+          <h3 className="typeSectionHeading">2. まず気をつけること</h3>
           <p className="cardLead">最初に見てほしい注意を先に確認し、補足の契約値は技術情報で確認してください。</p>
           <div className="warningPrimaryBlock">
             <p className="warningPrimaryLabel">最初に見てほしい注意（warning top3）</p>
@@ -261,7 +266,8 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
         </article>
 
         <article className="card">
-          <h3>3. 次にどこを見るか</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Next Actions</p>
+          <h3 className="typeSectionHeading">3. 次にどこを見るか</h3>
           <p className="cardLead">迷ったら、まず下の最初の一手を実行し、必要に応じて補助導線を使ってください。</p>
           <div className="nextActionHero">
             <p className="nextActionLabel">おすすめの最初の行動</p>
@@ -329,7 +335,8 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
       </div>
 
       <div className="evidenceBlock">
-        <h3>判定に使った根拠（evidence）</h3>
+        <p className="typeEnglishLabel evidenceEnglishLabel">Evidence</p>
+        <h3 className="typeSectionHeading">判定に使った根拠（evidence）</h3>
         <ul>
           {result.evidence.map((item) => (
             <li key={`${item.code}:${item.detail}`}>
@@ -349,14 +356,18 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
   return (
     <section className="resultPanel">
       <header className="resultHeader">
-        <h2>処理を完了できませんでした</h2>
+        <div className="resultHeaderText">
+          <p className="typeEnglishLabel resultHeaderEnglish">Process Status</p>
+          <h2 className="typePageHeading">処理を完了できませんでした</h2>
+        </div>
         <span className={`statusPill statusError`}>error</span>
       </header>
       <p className="cardLead">error は処理失敗ですが、次に進むための一手と導線は必ず残しています。</p>
 
       <div className="cardGrid">
         <article className="card">
-          <h3>1. 何が起きたか</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Error Summary</p>
+          <h3 className="typeSectionHeading">1. 何が起きたか</h3>
           <p>{error.message}</p>
           <p>{error.reason}</p>
           <p className="nextStepCode secondaryCode">
@@ -366,7 +377,8 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
         </article>
 
         <article className="card">
-          <h3>2. 次の一手</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Recommended Action</p>
+          <h3 className="typeSectionHeading">2. 次の一手</h3>
           <p className="cardLead">まず下の最初の一手を実行し、必要に応じて補助導線を使ってください。</p>
           <div className="nextActionHero">
             <p className="nextActionLabel">おすすめの最初の行動</p>
@@ -433,7 +445,8 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
         </article>
 
         <article className="card">
-          <h3>3. 確認できた事実</h3>
+          <p className="typeEnglishLabel cardEnglishLabel">Confirmed Facts</p>
+          <h3 className="typeSectionHeading">3. 確認できた事実</h3>
           <p className="cardLead">取得できた根拠のみを表示します。</p>
           <ul>
             {error.confirmed_facts.length === 0 ? <li>なし</li> : null}
@@ -507,13 +520,15 @@ export default function App(): JSX.Element {
   return (
     <main className="appRoot">
       <header className="appHeader">
-        <h1>BioFile Guide for Structure</h1>
-        <p>判定契約に基づく初期縦切り実装（fixture-driven）</p>
+        <p className="typeEnglishLabel appHeaderEnglish">Structure Entry Translator</p>
+        <h1 className="typeBrandHeading">BioFile Guide for Structure</h1>
+        <p className="appHeaderLead">判定契約に基づく初期縦切り実装（fixture-driven）</p>
         <a href="../" className="backLink">← Portal に戻る</a>
       </header>
 
       <section className="inputPanel">
-        <h2>入力</h2>
+        <p className="typeEnglishLabel panelEnglishLabel">Input</p>
+        <h2 className="typePageHeading">入力</h2>
         <p className="helperText">4文字PDB ID / 拡張PDB ID / ローカルPDB / ローカルmmCIF に対応します。</p>
         <p className="helperText">ローカルファイル本文はブラウザ内で処理し、外部送信しません。</p>
 
@@ -572,7 +587,8 @@ export default function App(): JSX.Element {
 
       {result === null ? (
         <section className="resultPanel placeholderPanel">
-          <h2>結果表示</h2>
+          <p className="typeEnglishLabel panelEnglishLabel">Result</p>
+          <h2 className="typePageHeading">結果表示</h2>
           <p>まだ実行されていません。ID入力またはファイル選択後に「判定を実行」を押してください。</p>
         </section>
       ) : result.status === 'success' ? (
