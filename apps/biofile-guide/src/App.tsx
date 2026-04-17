@@ -34,6 +34,68 @@ function renderEntryResolutionNote(status: SuccessEnvelope['result']['entry_reso
   return 'entry_resolution_status=unresolved のため、存在可否はまだ断定できません。'
 }
 
+const RECORD_TYPE_LABELS: Record<string, string> = {
+  experimental_structure: '実験で決定された構造',
+  computed_model: '計算で推定された構造モデル',
+  integrative_structure: '統合表現を含む構造',
+  unknown: '種類を断定できない構造',
+}
+
+const SOURCE_DATABASE_LABELS: Record<string, string> = {
+  PDB: 'PDB（実験構造データベース）',
+  AlphaFoldDB: 'AlphaFoldDB（予測モデル）',
+  ModelArchive: 'ModelArchive（計算モデル）',
+  local_file: 'ローカルファイル',
+  unknown: '出自を断定できません',
+}
+
+const RESOLVED_FORMAT_LABELS: Record<string, string> = {
+  pdb: 'PDB 形式',
+  mmcif: 'mmCIF 形式',
+  unknown: '形式を断定できません',
+}
+
+const CONFIDENCE_LEVEL_LABELS: Record<string, string> = {
+  high: '高',
+  medium: '中',
+  low: '低',
+}
+
+function renderRecordTypeLabel(recordType: string): string {
+  return RECORD_TYPE_LABELS[recordType] ?? `種類を断定できない構造（${recordType}）`
+}
+
+function renderSourceDatabaseLabel(sourceDatabase: string): string {
+  return SOURCE_DATABASE_LABELS[sourceDatabase] ?? sourceDatabase
+}
+
+function renderResolvedFormatLabel(resolvedFormat: string): string {
+  return RESOLVED_FORMAT_LABELS[resolvedFormat] ?? resolvedFormat
+}
+
+function renderConfidenceLabel(level: string): string {
+  return CONFIDENCE_LEVEL_LABELS[level] ?? level
+}
+
+function renderRecordTypeDescription(
+  recordType: SuccessEnvelope['result']['record_type'],
+  sourceDatabase: SuccessEnvelope['result']['source_database'],
+): string {
+  if (recordType === 'experimental_structure') {
+    return '実験由来の根拠を優先して案内します。原典情報と合わせて確認してください。'
+  }
+  if (recordType === 'computed_model') {
+    return '計算モデル前提で扱います。必要に応じて由来データベースの情報を確認してください。'
+  }
+  if (recordType === 'integrative_structure') {
+    return '統合表現を含むため、旧PDB互換性の注意を先に確認してください。'
+  }
+  if (sourceDatabase === 'local_file') {
+    return 'ローカル入力のため出自を断定せず、確認できた範囲で案内します。'
+  }
+  return '根拠不足または競合のため断定を保留しています。次の一手から確認を進めてください。'
+}
+
 function renderCompatibilitySummary(
   compatibility: SuccessEnvelope['result']['legacy_pdb_compatibility'],
 ): string {
@@ -81,7 +143,6 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
       <div className="metaRow">
         <span>schema_version: {envelope.schema_version}</span>
         <span>input_type: {result.input_type}</span>
-        <span>entry_resolution_status: {result.entry_resolution_status}</span>
       </div>
 
       {hasUnknown ? (
@@ -101,15 +162,21 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
         <article className="card">
           <h3>1. これは何の構造か</h3>
           <p className="cardLead">構造タイプと由来を先に確認します。断定できない場合は unknown のまま表示します。</p>
+          <div className="primaryMeaningBlock">
+            <p className="primaryMeaningLabel">判定の要点</p>
+            <p className="primaryMeaningTitle">{renderRecordTypeLabel(result.record_type)}</p>
+            <p className="primaryMeaningDescription">{renderRecordTypeDescription(result.record_type, result.source_database)}</p>
+          </div>
           <dl className="detailList detailListPrimary">
-            <div><dt>構造タイプ</dt><dd>{result.record_type}</dd></div>
-            <div><dt>由来データベース</dt><dd>{result.source_database}</dd></div>
-            <div><dt>フォーマット</dt><dd>{result.resolved_format}</dd></div>
-            <div><dt>信頼度（分類）</dt><dd>{result.confidence.level}</dd></div>
+            <div><dt>由来データベース</dt><dd>{renderSourceDatabaseLabel(result.source_database)}</dd></div>
+            <div><dt>フォーマット</dt><dd>{renderResolvedFormatLabel(result.resolved_format)}</dd></div>
+            <div><dt>信頼度（分類）</dt><dd>{renderConfidenceLabel(result.confidence.level)}</dd></div>
           </dl>
           <details className="technicalDetails">
             <summary>技術情報（raw contract）</summary>
             <dl className="detailList">
+              <div><dt>input_type</dt><dd>{result.input_type}</dd></div>
+              <div><dt>entry_resolution_status</dt><dd>{result.entry_resolution_status}</dd></div>
               <div><dt>record_type</dt><dd>{result.record_type}</dd></div>
               <div><dt>resolved_format</dt><dd>{result.resolved_format}</dd></div>
               <div><dt>source_database</dt><dd>{result.source_database}</dd></div>

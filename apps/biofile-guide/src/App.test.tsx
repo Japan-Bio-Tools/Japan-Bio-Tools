@@ -19,9 +19,24 @@ describe('App contract rendering', () => {
     expect(screen.getByText('1. これは何の構造か')).toBeInTheDocument()
     expect(screen.getByText('2. まず気をつけること')).toBeInTheDocument()
     expect(screen.getByText('3. 次にどこを見るか')).toBeInTheDocument()
+    expect(screen.getByText('実験で決定された構造')).toBeInTheDocument()
     expect(screen.getByText('おすすめの最初の行動')).toBeInTheDocument()
     expect(screen.getByText(/存在確認済みを意味しません/)).toBeInTheDocument()
     expect(screen.getAllByText('外部サイト').length).toBeGreaterThan(0)
+
+    const card1 = screen.getByRole('heading', { name: '1. これは何の構造か' }).closest('.card')
+    expect(card1).not.toBeNull()
+
+    const card1PrimaryList = (card1 as HTMLElement).querySelector('.detailListPrimary')
+    expect(card1PrimaryList).not.toBeNull()
+    expect(within(card1PrimaryList as HTMLElement).queryByText('experimental_structure')).not.toBeInTheDocument()
+
+    const card1TechnicalDetails = within(card1 as HTMLElement)
+      .getByText('技術情報（raw contract）')
+      .closest('details')
+    expect(card1TechnicalDetails).not.toBeNull()
+    expect(within(card1TechnicalDetails as HTMLElement).getByText('record_type')).toBeInTheDocument()
+    expect(within(card1TechnicalDetails as HTMLElement).getByText('experimental_structure')).toBeInTheDocument()
 
     const rcsbLink = screen.getByRole('link', { name: 'RCSB エントリ' })
     const rcsbLinkRow = rcsbLink.closest('.linkLabelRow')

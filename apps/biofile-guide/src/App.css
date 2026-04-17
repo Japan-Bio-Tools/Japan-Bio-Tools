@@ -195,6 +195,34 @@
   font-size: 14px;
 }
 
+.primaryMeaningBlock {
+  border: 1px solid #bfdbfe;
+  background: #f8fbff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.primaryMeaningLabel {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.primaryMeaningTitle {
+  margin: 4px 0 0;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.primaryMeaningDescription {
+  margin: 6px 0 0;
+  color: #334155;
+  font-size: 13px;
+}
+
 .detailList {
   margin: 0;
   display: grid;
