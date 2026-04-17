@@ -132,6 +132,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
   const prioritizedWarnings = result.beginner_warning.slice(0, 3)
   const remainingWarnings = result.beginner_warning.slice(3)
   const warningCodes = result.warning_codes.length > 0 ? result.warning_codes.join(', ') : 'none'
+  const [primaryNextLink, ...supportingNextLinks] = result.next_links
 
   return (
     <section className="resultPanel">
@@ -190,14 +191,10 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
 
         <article className="card">
           <h3>2. まず気をつけること</h3>
-          <p className="cardLead">注意点は上から優先です。まず先頭3件を確認してください。</p>
-          <div className={`notice noticeCompact ${renderCompatibilityClass(result.legacy_pdb_compatibility)}`}>
-            <strong>互換性メモ</strong>
-            <p>{renderCompatibilitySummary(result.legacy_pdb_compatibility)}</p>
-          </div>
-          <div className="warningBlock">
-            <h4>優先表示（先頭3件）</h4>
-            <ul>
+          <p className="cardLead">最初に見てほしい注意を先に確認し、補足の契約値は技術情報で確認してください。</p>
+          <div className="warningPrimaryBlock">
+            <p className="warningPrimaryLabel">最初に見てほしい注意（warning top3）</p>
+            <ul className="warningPrimaryList">
               {prioritizedWarnings.length === 0 ? <li>現在、優先表示すべき warning はありません。</li> : null}
               {prioritizedWarnings.map((warning, index) => (
                 <li key={`${warning}-${index}`}>{warning}</li>
@@ -214,9 +211,14 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
               </details>
             ) : null}
           </div>
+          <div className={`notice noticeCompact warningSupportBlock ${renderCompatibilityClass(result.legacy_pdb_compatibility)}`}>
+            <strong>補足の互換性メモ</strong>
+            <p>{renderCompatibilitySummary(result.legacy_pdb_compatibility)}</p>
+          </div>
           <details className="technicalDetails">
             <summary>技術情報（raw contract）</summary>
             <dl className="detailList">
+              <div><dt>warning_codes</dt><dd><code>{warningCodes}</code></dd></div>
               <div><dt>legacy_pdb_compatibility</dt><dd>{result.legacy_pdb_compatibility}</dd></div>
               <div><dt>legacy_pdb_reason_text</dt><dd>{formatNullable(result.legacy_pdb_reason_text)}</dd></div>
               <div><dt>model_count</dt><dd>{formatNullable(result.model_count)}</dd></div>
@@ -224,38 +226,64 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
               <div><dt>ligand_status</dt><dd>{result.ligand_status}</dd></div>
               <div><dt>water_status</dt><dd>{result.water_status}</dd></div>
             </dl>
-            <p className="nextStepCode secondaryCode"><span>warning_codes: </span><code>{warningCodes}</code></p>
           </details>
         </article>
 
         <article className="card">
           <h3>3. 次にどこを見るか</h3>
-          <p className="cardLead">迷ったら、まずこの一手から進めてください。</p>
+          <p className="cardLead">迷ったら、まず下の最初の一手を実行し、必要に応じて補助導線を使ってください。</p>
           <div className="nextActionHero">
             <p className="nextActionLabel">おすすめの最初の行動</p>
             <p className="nextActionText">{result.recommended_next_step}</p>
           </div>
-          <p className="linkIntro">以下は allowlist で生成された導線です。外部遷移は「外部サイト」で明示します。</p>
-          <ul className="linkList">
-            {result.next_links.map((link) => {
-              const external = isExternalDestination(link.destination_type)
-              return (
-                <li key={`${link.destination_type}:${link.href}`}>
-                  <div className="linkLabelRow">
-                    <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
-                      {link.label}
-                    </a>
-                    {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
-                  </div>
-                  <small>{link.reason}</small>
-                </li>
-              )
-            })}
-          </ul>
-          <p className="nextStepCode secondaryCode">
-            <span>recommended_next_step_code: </span>
-            <code>{result.recommended_next_step_code}</code>
-          </p>
+          <div className="nextLinksSection">
+            <h4>今すぐ見る候補</h4>
+            <ul className="linkList">
+              {primaryNextLink === undefined ? <li>表示できる導線がありません。</li> : null}
+              {primaryNextLink !== undefined ? (() => {
+                const external = isExternalDestination(primaryNextLink.destination_type)
+                return (
+                  <li key={`${primaryNextLink.destination_type}:${primaryNextLink.href}`}>
+                    <div className="linkLabelRow">
+                      <a href={primaryNextLink.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                        {primaryNextLink.label}
+                      </a>
+                      {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                    </div>
+                    <small>{primaryNextLink.reason}</small>
+                  </li>
+                )
+              })() : null}
+            </ul>
+          </div>
+          {supportingNextLinks.length > 0 ? (
+            <div className="nextLinksSection">
+              <h4>補助的に見る候補</h4>
+              <ul className="linkList">
+                {supportingNextLinks.map((link) => {
+                  const external = isExternalDestination(link.destination_type)
+                  return (
+                    <li key={`${link.destination_type}:${link.href}`}>
+                      <div className="linkLabelRow">
+                        <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                          {link.label}
+                        </a>
+                        {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                      </div>
+                      <small>{link.reason}</small>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+          <details className="technicalDetails">
+            <summary>技術情報（raw contract）</summary>
+            <p className="nextStepCode secondaryCode">
+              <span>recommended_next_step_code: </span>
+              <code>{result.recommended_next_step_code}</code>
+            </p>
+          </details>
         </article>
       </div>
 
@@ -275,6 +303,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
 
 function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
   const { error } = envelope
+  const [primaryNextLink, ...supportingNextLinks] = error.next_links
 
   return (
     <section className="resultPanel">
@@ -297,31 +326,59 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
 
         <article className="card">
           <h3>2. 次の一手</h3>
-          <p className="cardLead">まず下の行動を実行してください。</p>
+          <p className="cardLead">まず下の最初の一手を実行し、必要に応じて補助導線を使ってください。</p>
           <div className="nextActionHero">
             <p className="nextActionLabel">おすすめの最初の行動</p>
             <p className="nextActionText">{error.recommended_next_step}</p>
           </div>
-          <ul className="linkList">
-            {error.next_links.map((link) => {
-              const external = isExternalDestination(link.destination_type)
-              return (
-                <li key={`${link.destination_type}:${link.href}`}>
-                  <div className="linkLabelRow">
-                    <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
-                      {link.label}
-                    </a>
-                    {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
-                  </div>
-                  <small>{link.reason}</small>
-                </li>
-              )
-            })}
-          </ul>
-          <p className="nextStepCode secondaryCode">
-            <span>recommended_next_step_code: </span>
-            <code>{error.recommended_next_step_code}</code>
-          </p>
+          <div className="nextLinksSection">
+            <h4>今すぐ開く候補</h4>
+            <ul className="linkList">
+              {primaryNextLink === undefined ? <li>表示できる導線がありません。</li> : null}
+              {primaryNextLink !== undefined ? (() => {
+                const external = isExternalDestination(primaryNextLink.destination_type)
+                return (
+                  <li key={`${primaryNextLink.destination_type}:${primaryNextLink.href}`}>
+                    <div className="linkLabelRow">
+                      <a href={primaryNextLink.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                        {primaryNextLink.label}
+                      </a>
+                      {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                    </div>
+                    <small>{primaryNextLink.reason}</small>
+                  </li>
+                )
+              })() : null}
+            </ul>
+          </div>
+          {supportingNextLinks.length > 0 ? (
+            <div className="nextLinksSection">
+              <h4>補助的に開く候補</h4>
+              <ul className="linkList">
+                {supportingNextLinks.map((link) => {
+                  const external = isExternalDestination(link.destination_type)
+                  return (
+                    <li key={`${link.destination_type}:${link.href}`}>
+                      <div className="linkLabelRow">
+                        <a href={link.href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+                          {link.label}
+                        </a>
+                        {external ? <span className="linkBadge">{renderExternalBadge(external)}</span> : null}
+                      </div>
+                      <small>{link.reason}</small>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+          <details className="technicalDetails">
+            <summary>技術情報（raw contract）</summary>
+            <p className="nextStepCode secondaryCode">
+              <span>recommended_next_step_code: </span>
+              <code>{error.recommended_next_step_code}</code>
+            </p>
+          </details>
         </article>
 
         <article className="card">
