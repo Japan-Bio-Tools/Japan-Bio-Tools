@@ -115,7 +115,7 @@ live check failure の意味:
 ## 現時点で未実装のもの
 
 - Anonymous Telemetry の運用設定UIと高度化（初期送信処理は opt-in + event code 限定で実装済み）
-- 永続キャッシュ（localStorage / IndexedDB / server cache）
+- 永続キャッシュ（localStorage による identifier 入力の初期実装は導入済み。IndexedDB / server cache は未実装）
 - 高度な retry policy（指数バックオフ、circuit breaker など）
 - Mol* / iCn3D の埋め込み統合（現在は外部遷移導線のみ）
 - gold-set 最低ケース coverage の拡張（expected-output 駆動の初期実装は導入済み）

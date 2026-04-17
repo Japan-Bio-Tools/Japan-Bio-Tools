@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { runBioFileGuide } from './application/runBioFileGuide'
+import { resolveMetadataAdapterMode } from './application/metadataAdapterFactory'
+import { normalizeInput } from './domain/inputNormalizer'
 import { isExternalDestination } from './domain/nextLinkSelector'
+import {
+  createIdentifierPersistentCacheTarget,
+  readIdentifierPersistentCache,
+  shouldPersistIdentifierEnvelope,
+  writeIdentifierPersistentCache,
+} from './infrastructure/persistentCache/localStoragePersistentResultCache'
 import type { BioFileEnvelope, ErrorEnvelope, SuccessEnvelope } from './types/contracts'
 import {
   emitAnonymousTelemetryEvent,
@@ -20,6 +28,8 @@ const SAMPLE_INPUTS: SampleInput[] = [
   { label: '不正入力の例', value: 'abc' },
   { label: 'API一時不達の例', value: '2UNV' },
 ]
+
+const ADAPTER_MODE = resolveMetadataAdapterMode(import.meta.env.VITE_BIOFILE_GUIDE_ADAPTER_MODE)
 
 function formatNullable(value: string | number | null): string {
   return value === null ? 'unknown' : String(value)
@@ -472,9 +482,23 @@ export default function App(): JSX.Element {
 
   const run = async (): Promise<void> => {
     setIsRunning(true)
+    const normalizedInput = normalizeInput(textInput, selectedFile)
+    const cacheTarget = createIdentifierPersistentCacheTarget(normalizedInput, ADAPTER_MODE)
     try {
-      const envelope = await runBioFileGuide({ textInput, file: selectedFile })
+      if (cacheTarget !== null) {
+        const cachedEnvelope = readIdentifierPersistentCache(cacheTarget)
+        if (cachedEnvelope !== null) {
+          setResult(cachedEnvelope)
+          return
+        }
+      }
+
+      const envelope = await runBioFileGuide({ textInput, file: selectedFile, adapterMode: ADAPTER_MODE })
       setResult(envelope)
+
+      if (cacheTarget !== null && shouldPersistIdentifierEnvelope(envelope)) {
+        writeIdentifierPersistentCache(cacheTarget, envelope)
+      }
     } finally {
       setIsRunning(false)
     }
