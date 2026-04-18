@@ -11,10 +11,14 @@
 /
 ├─ apps/
 │  ├─ portal/
-│  └─ biofile-guide/
+│  ├─ biofile-guide/
+│  └─ shared/styles/
 ├─ packages/
 ├─ docs/
-│  └─ biofile-guide/
+│  ├─ biofile-guide/
+│  ├─ design/
+│  ├─ security-privacy.md
+│  └─ repo-map.md
 ├─ scripts/
 ├─ archive/
 │  ├─ apps/sse-diag/
@@ -32,6 +36,21 @@
 ### apps/biofile-guide
 - 本命アプリ（準備中）
 - 公開パス: `/Japan-Bio-Tools/biofile-guide/`
+
+### apps/shared/styles
+- `design-tokens.css` で現役アプリ共通のデザイントークンを管理する
+- `apps/portal` と `apps/biofile-guide` の見た目整合に使う
+
+## 現役ドキュメント導線
+
+### docs/biofile-guide
+- BioFile Guide の親正本・子正本群
+
+### docs/design
+- `visual-design.md` は Portal / BioFile Guide / 共通スタイルのビジュアル方針正本
+
+### docs/security-privacy.md
+- リポジトリ全体で維持する security / privacy 境界の正本
 
 ## Archive
 

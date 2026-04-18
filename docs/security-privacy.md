@@ -8,9 +8,15 @@
 - 解析・可視化・差分生成は **ブラウザ内（JS/WASM）で完結**させる。
 
 ## ネットワーク方針
-- 原則として「PDB IDで外部取得」は実装しない（ローカル投入を基本にする）。
-- Analytics/Telemetry SDK は原則入れない（入れるなら用途と送信内容を明記し、オプトインにする）。
-- 将来、外部取得を例外的に導入する場合でも **明示的なオプトイン**とし、本ドキュメントに追記する。
+- `VITE_BIOFILE_GUIDE_ADAPTER_MODE` の既定値は `mock` であり、このモードでは外部 metadata API へ問い合わせない。
+- `real_rcsb` / `real_pdbe` / `real_pdbj` を明示的に選んだ場合のみ、対応する公開 metadata API を read-only で参照する。
+- 外部参照時に送信してよい値は、正規化済み識別子と API 問い合わせに必要な最小パラメータに限定する。
+- **ローカル投入ファイル本文・座標・ファイル名・raw text は外部送信しない。**
+
+## 匿名計測方針
+- 追加の Analytics/Telemetry SDK は導入していない。
+- 匿名計測は `VITE_BIOFILE_GUIDE_ANONYMOUS_TELEMETRY_ENDPOINT` が設定され、かつ opt-in が `true` のときだけ送信する。
+- 送信 payload は `event_code` と `event_category` のみとし、raw structure data や識別子を含めない。
 
 ## ホスティング
 - GitHub Pages に静的ホスティングする。
@@ -19,5 +25,7 @@
 
 ## PRレビュー用チェックリスト
 - [ ] ファイル内容を外部送信するコード経路がない
+- [ ] `adapter mode` の既定が `mock` で、real mode は明示切替になっている
+- [ ] real mode でも外部送信が識別子中心の最小パラメータに限定されている
 - [ ] 依存関係が “勝手に通信” しない（SDK/Telemetry等）
-- [ ] 例外的な外部取得がある場合、オプトインで、ここに仕様が追記されている
+- [ ] 匿名計測が opt-in 前提で、識別子・入力本文・ファイル名を送信しない

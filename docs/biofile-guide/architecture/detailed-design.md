@@ -72,7 +72,10 @@ Mol* は web-based open-source toolkit として公開され、Viewer には `Op
 
 ### 4-2. ID入力時の外部アクセス
 
-`pdb_id` および `extended_pdb_id` 入力時は、対応する外部メタデータ取得のために API アクセスを行う。
+`pdb_id` および `extended_pdb_id` 入力時の外部アクセスは、adapter mode で明示制御する。
+
+* 既定の `mock` mode では、外部 metadata API へアクセスしない。
+* `real_rcsb` / `real_pdbe` / `real_pdbj` を明示的に選んだ場合のみ、対応する公開 metadata API を read-only で参照する。
 
 外部送信してよいのは以下に限定する。
 
@@ -348,11 +351,14 @@ DTOは、複数ソースの API レスポンス差分を吸収し、分類エン
 
 ### 27-1. キャッシュ
 
-* 同一セッション内キャッシュを持つ
-* キャッシュキーは `adapter + schema_version + resolved_identifier`
-* TTL は 15分
-* cross-session 永続保存は行わない
-* ローカルファイル本文はキャッシュしない
+* adapter 参照結果は同一セッション内メモリキャッシュを持つ
+* セッションキャッシュキーは `source + role + schema_version + endpoint_base + canonical_identifier`
+* セッションキャッシュ TTL は 15分（既定）
+* identifier 入力の結果は `localStorage` へ cross-session 永続キャッシュする（TTL 24時間）
+* 永続キャッシュキーは `namespace + scope + cache_version + schema_version + adapter_mode + input_type + canonical_identifier`
+* 永続キャッシュ対象は identifier 入力のみとし、ローカルファイル入力は対象外とする
+* 永続キャッシュ対象の結果は stable な envelope に限定し、`external_metadata_unavailable` などの不安定結果は保存しない
+* ローカルファイル本文、座標、ファイル名、生テキストはセッション/永続のいずれにもキャッシュしない
 
 ### 27-2. タイムアウト
 
