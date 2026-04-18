@@ -8,6 +8,7 @@ import { LINK_TEMPLATES } from '../domain/contractConstants'
 import { buildEvidenceAndWarnings } from '../domain/evidenceWarningBuilder'
 import type { MetadataAdapter } from '../infrastructure/adapters/metadataAdapter'
 import {
+  getRecordedFixtureByCase,
   getRecordedFixtureByIdentifier,
   toAdapterLookupResultFromRecorded,
 } from '../mocks/recordedMetadataFixtures'
@@ -527,6 +528,26 @@ const GOLD_SET_EXPECTED_OUTPUT_CATALOG: GoldSetCase[] = [
     },
   },
   {
+    name: 'entry_not_found fallback: expected output カタログ一致',
+    run: () => runBioFileGuide({ textInput: '9ZZ9', file: null, adapterMode: 'mock' }),
+    expected: {
+      status: 'error',
+      strict: {
+        error_code: 'entry_not_found',
+        recommended_next_step_code: 'check_origin_metadata',
+      },
+      set: {
+        evidence_codes: ['pdb_identifier_detected', 'format_pdb_detected'],
+        next_link_destination_types: ['search_entry', 'canonical_entry'],
+      },
+      meaning: {
+        message_contains: ['該当エントリ'],
+        reason_contains: ['Primary/Secondary'],
+        recommended_next_step_contains: '出自メタデータ',
+      },
+    },
+  },
+  {
     name: 'external_metadata_unavailable: expected output カタログ一致',
     run: () =>
       runBioFileGuide({
@@ -554,6 +575,117 @@ const GOLD_SET_EXPECTED_OUTPUT_CATALOG: GoldSetCase[] = [
         message_contains: ['外部メタデータ'],
         reason_contains: ['一時取得不能'],
         recommended_next_step_contains: 'ガイド',
+      },
+    },
+  },
+  {
+    name: 'safe forward 有効時は unavailable でも success+unknown へ進める: expected output カタログ一致',
+    run: () =>
+      runBioFileGuide({
+        textInput: '2UNV',
+        file: null,
+        adapters: staticAdaptersForIdentifier('2UNV', {
+          PDBj: toAdapterLookupResultFromRecorded(
+            getRecordedFixtureByIdentifier('PDBj', '9UOK'),
+            'tertiary',
+          ),
+        }),
+      }),
+    expected: {
+      status: 'success',
+      strict: {
+        input_type: 'pdb_id',
+        entry_resolution_status: 'unresolved',
+        resolved_format: 'pdb',
+        record_type: 'unknown',
+        source_database: 'unknown',
+        legacy_pdb_compatibility: 'compatible',
+        recommended_next_step_code: 'check_origin_metadata',
+        unknown_reason_code: 'metadata_temporarily_unavailable',
+      },
+      nullable: {
+        resolved_identifier: '2UNV',
+        experiment_method: null,
+        model_count: null,
+        chain_count: null,
+        legacy_pdb_reason_code: null,
+      },
+      enum: {
+        ligand_status: 'unknown',
+        water_status: 'unknown',
+        confidence_scope: 'primary_classification',
+        confidence_level: 'low',
+      },
+      set: {
+        warning_codes: ['classification_low_confidence', 'external_metadata_temporarily_unavailable'],
+        evidence_codes: [
+          'pdb_identifier_detected',
+          'format_pdb_detected',
+          'metadata_secondary_lookup_failed',
+          'metadata_tertiary_lookup_failed',
+          'external_metadata_lookup_failed',
+        ],
+        next_link_destination_types: ['canonical_entry', 'viewer_remote'],
+      },
+      meaning: {
+        beginner_warning_contains: ['根拠が弱い', '外部情報'],
+        recommended_next_step_contains: '出自メタデータ',
+        legacy_pdb_reason_text_contains: null,
+      },
+    },
+  },
+  {
+    name: 'conflict_marker を単一根拠へ絞ると computed_model を維持する: expected output カタログ一致',
+    run: () =>
+      runBioFileGuide({
+        textInput: 'pdb_00001abc',
+        file: null,
+        adapters: staticAdaptersForIdentifier('pdb_00001abc', {
+          PDBe: toAdapterLookupResultFromRecorded(getRecordedFixtureByCase('PDBe', 'not_found'), 'secondary'),
+          PDBj: toAdapterLookupResultFromRecorded(getRecordedFixtureByCase('PDBj', 'not_found'), 'tertiary'),
+        }),
+      }),
+    expected: {
+      status: 'success',
+      strict: {
+        input_type: 'extended_pdb_id',
+        entry_resolution_status: 'verified',
+        resolved_format: 'mmcif',
+        record_type: 'computed_model',
+        source_database: 'PDB',
+        legacy_pdb_compatibility: 'incompatible',
+        recommended_next_step_code: 'open_rcsb_entry',
+        unknown_reason_code: null,
+      },
+      nullable: {
+        resolved_identifier: 'pdb_00001abc',
+        experiment_method: null,
+        model_count: null,
+        chain_count: null,
+        legacy_pdb_reason_code: 'extended_id_requires_mmcif',
+      },
+      enum: {
+        ligand_status: 'unknown',
+        water_status: 'unknown',
+        confidence_scope: 'primary_classification',
+        confidence_level: 'high',
+      },
+      set: {
+        warning_codes: ['legacy_pdb_risk'],
+        evidence_codes: [
+          'extended_pdb_identifier_detected',
+          'format_mmcif_detected',
+          'explicit_modelcif_marker',
+          'explicit_pdb_archive_provenance',
+          'metadata_primary_source_used',
+          'legacy_pdb_incompatibility_marker',
+        ],
+        next_link_destination_types: ['canonical_entry', 'viewer_remote'],
+      },
+      meaning: {
+        beginner_warning_contains: ['旧PDB形式'],
+        recommended_next_step_contains: 'RCSB のエントリページ',
+        legacy_pdb_reason_text_contains: '拡張PDB ID前提',
       },
     },
   },
@@ -793,6 +925,59 @@ describe('gold-set focused regressions', () => {
       'ligand_present',
       'water_present',
     ])
+  })
+
+  it('safe forward 許可フラグで unavailable の扱いを切り替える', async () => {
+    const blocked = await runBioFileGuide({
+      textInput: '2UNV',
+      file: null,
+      adapters: staticAdaptersForIdentifier('2UNV'),
+    })
+    expectError(blocked)
+    expect(blocked.error.error_code).toBe('external_metadata_unavailable')
+
+    const allowed = await runBioFileGuide({
+      textInput: '2UNV',
+      file: null,
+      adapters: staticAdaptersForIdentifier('2UNV', {
+        PDBj: toAdapterLookupResultFromRecorded(
+          getRecordedFixtureByIdentifier('PDBj', '9UOK'),
+          'tertiary',
+        ),
+      }),
+    })
+    expectSuccess(allowed)
+    expect(allowed.result.record_type).toBe('unknown')
+    expect(allowed.result.unknown_reason_code).toBe('metadata_temporarily_unavailable')
+  })
+
+  it('entry_not_found の next_links は template と正規化IDを維持する', async () => {
+    const envelope = await runBioFileGuide({
+      textInput: '9nf0',
+      file: null,
+      adapters: staticAdaptersForIdentifier('9NF0'),
+    })
+    expectError(envelope)
+
+    const hrefs = envelope.error.next_links.map((link) => link.href)
+    expect(hrefs).toContain(hrefFromTemplate(LINK_TEMPLATES.rcsbSearch.template, '9NF0'))
+    expect(hrefs).toContain(hrefFromTemplate(LINK_TEMPLATES.pdbeEntry.template, '9NF0'))
+  })
+
+  it('partial data では verified でも record_type を過剰確定しない', async () => {
+    const envelope = await runBioFileGuide({
+      textInput: '9SPA',
+      file: null,
+      adapters: staticAdaptersForIdentifier('9SPA'),
+    })
+    expectSuccess(envelope)
+
+    expect(envelope.result.entry_resolution_status).toBe('verified')
+    expect(envelope.result.evidence.some((item) => item.code === 'single_model_detected')).toBe(true)
+    expect(envelope.result.record_type).toBe('unknown')
+    expect(envelope.result.unknown_reason_code).toBe('insufficient_evidence')
+    expect(envelope.result.confidence.level).toBe('low')
+    expect(envelope.result.recommended_next_step_code).toBe('check_origin_metadata')
   })
 
   it('resolved_identifier 注意表示を UI が維持する', async () => {

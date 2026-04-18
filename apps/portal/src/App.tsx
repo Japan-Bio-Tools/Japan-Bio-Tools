@@ -42,7 +42,7 @@ function statusClassName(status: ProductStatus): string {
 export default function App() {
   return (
     <main className="portalRoot">
-      <header className="portalHero">
+      <header className="portalHero portalHeroPrimary">
         <p className="typeEnglishLabel">Japan-Bio-Tools Ecosystem Portal</p>
         <h1 className="typeBrandHeading">Japan-Bio-Tools</h1>
         <p className="heroLead">
@@ -53,7 +53,7 @@ export default function App() {
         </p>
       </header>
 
-      <section className="portalSection">
+      <section className="portalSection portalSectionPrinciples">
         <p className="typeEnglishLabel">Operating Principles</p>
         <h2 className="typePageHeading">運営原則</h2>
         <ul className="principlesList">
@@ -64,7 +64,7 @@ export default function App() {
         </ul>
       </section>
 
-      <section className="portalSection">
+      <section className="portalSection portalSectionProducts">
         <p className="typeEnglishLabel">Products</p>
         <h2 className="typePageHeading">製品群</h2>
         <p className="typeBodyText sectionLead">
@@ -72,12 +72,17 @@ export default function App() {
         </p>
         <ul className="productGrid">
           {PRODUCTS.map((product) => (
-            <li key={product.titleJa} className="productCard">
+            <li
+              key={product.titleJa}
+              className={`productCard ${product.href === undefined ? 'productCardPending' : 'productCardReady'}`}
+            >
               <div className="productMetaRow">
                 <span className={statusClassName(product.status)}>{product.statusLabel}</span>
               </div>
-              <h3 className="typeSectionHeading">{product.titleJa}</h3>
-              <p className="typeEnglishLabel productEnglishName">{product.titleEn}</p>
+              <div className="productTitleBlock">
+                <h3 className="typeSectionHeading">{product.titleJa}</h3>
+                <p className="typeEnglishLabel productEnglishName">{product.titleEn}</p>
+              </div>
               <p className="typeBodyText">{product.summary}</p>
               {product.href === undefined ? (
                 <p className="productPlaceholder typeMetaLabel">公開導線は準備中です。</p>
@@ -91,7 +96,7 @@ export default function App() {
         </ul>
       </section>
 
-      <section className="portalSection">
+      <section className="portalSection portalSectionWorkflow">
         <p className="typeEnglishLabel">Workflow</p>
         <h2 className="typePageHeading">推奨ワークフロー</h2>
         <ol className="workflowList">
@@ -110,7 +115,7 @@ export default function App() {
         </ol>
       </section>
 
-      <section className="portalSection">
+      <section className="portalSection portalSectionResources">
         <p className="typeEnglishLabel">References</p>
         <h2 className="typePageHeading">参考資料と連携階層</h2>
         <div className="resourceGrid">

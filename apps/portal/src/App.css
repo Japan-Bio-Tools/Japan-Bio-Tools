@@ -7,7 +7,7 @@
   margin: 0 auto;
   padding: var(--space-7) var(--space-5) var(--space-9);
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 
 .portalHero,
@@ -21,7 +21,21 @@
 .portalHero {
   padding: var(--space-7);
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  border-color: var(--color-border-default);
+}
+
+.portalHeroPrimary {
+  position: relative;
+  overflow: clip;
+}
+
+.portalHeroPrimary::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--color-border-default);
 }
 
 .portalHero h1 {
@@ -29,25 +43,26 @@
 }
 
 .heroLead {
-  margin: var(--space-2) 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--color-text-primary);
-  font-size: 1.06rem;
+  font-size: 1.08rem;
   font-weight: 620;
   line-height: var(--line-height-relaxed);
+  max-width: 52ch;
 }
 
 .heroSub {
   margin: 0;
   color: var(--color-text-secondary);
-  max-width: 78ch;
+  max-width: 72ch;
 }
 
 .portalSection {
-  padding: var(--space-5);
+  padding: var(--space-6);
 }
 
 .portalSection h2 {
-  margin: var(--space-1) 0 var(--space-2);
+  margin: var(--space-1) 0 var(--space-3);
 }
 
 .sectionLead {
@@ -56,7 +71,7 @@
 }
 
 .principlesList {
-  margin: var(--space-3) 0 0;
+  margin: var(--space-2) 0 0;
   padding-left: 20px;
   display: grid;
   gap: var(--space-2);
@@ -69,16 +84,25 @@
   padding: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .productCard {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: var(--color-surface-secondary);
+  background: var(--color-surface-primary);
   padding: var(--space-4);
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  grid-template-rows: auto auto auto 1fr auto;
+}
+
+.productCardReady {
+  border-color: var(--color-border-default);
+}
+
+.productCardPending {
+  background: var(--color-surface-secondary);
 }
 
 .productMetaRow {
@@ -92,8 +116,14 @@
   margin: 0;
 }
 
+.productTitleBlock {
+  display: grid;
+  gap: var(--space-1);
+}
+
 .productEnglishName {
   margin: 0;
+  color: var(--color-text-muted);
 }
 
 .productCard p {
@@ -113,6 +143,7 @@
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-meta);
   font-weight: 650;
+  align-self: end;
 }
 
 .productLink:hover {
@@ -123,17 +154,43 @@
 .productPlaceholder {
   margin-top: var(--space-2);
   color: var(--color-text-muted);
+  align-self: end;
 }
 
 .workflowList {
-  margin: var(--space-3) 0 0;
-  padding-left: 20px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  list-style: none;
+  counter-reset: workflow-step;
 }
 
 .workflowList li {
+  counter-increment: workflow-step;
+  position: relative;
+  padding-left: calc(var(--space-5) + 2px);
   color: var(--color-text-secondary);
+}
+
+.workflowList li::before {
+  content: counter(workflow-step);
+  position: absolute;
+  inset: 1px auto auto 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-surface-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-badge);
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.workflowList strong {
+  color: var(--color-text-primary);
 }
 
 .workflowList p {
@@ -141,15 +198,18 @@
 }
 
 .resourceGrid {
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   grid-template-columns: 1.1fr 1.1fr 0.8fr;
 }
 
 .resourceTier {
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
 }
 
 .resourceHeaderRow {
@@ -168,22 +228,31 @@
   margin: 0;
   padding-left: 18px;
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
+}
+
+.resourceTier a {
+  color: var(--color-link);
+}
+
+.resourceTier a:hover {
+  color: var(--color-link-hover);
 }
 
 .resourceTierOfficial {
-  border: 1px solid var(--color-border-strong);
+  border-color: var(--color-border-strong);
   background: var(--color-surface-primary);
 }
 
 .resourceTierCurated {
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-surface-secondary);
+  border-color: var(--color-border-default);
+  background: #f4f8fc;
 }
 
 .resourceTierSponsored {
-  border: 1px dashed var(--badge-sponsored-border);
-  background: #f9f5f4;
+  border-style: dashed;
+  border-color: var(--badge-sponsored-border);
+  background: #fcf8f7;
   color: var(--color-text-muted);
 }
 
@@ -212,5 +281,9 @@
 
   .portalSection {
     padding: var(--space-4);
+  }
+
+  .workflowList li {
+    padding-left: var(--space-6);
   }
 }

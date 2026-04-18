@@ -3,7 +3,7 @@
   margin: 0 auto;
   padding: var(--space-7) var(--space-5) var(--space-9);
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .appHeader {
@@ -26,6 +26,7 @@
 .appHeaderLead {
   margin: var(--space-2) 0 0;
   color: var(--color-text-secondary);
+  max-width: 72ch;
 }
 
 .backLink {
@@ -46,6 +47,8 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-subtle);
   padding: var(--space-5);
+  display: grid;
+  gap: var(--space-4);
 }
 
 .panelEnglishLabel {
@@ -54,12 +57,13 @@
 
 .inputPanel h2,
 .resultPanel h2 {
-  margin: var(--space-1) 0 var(--space-2);
+  margin: var(--space-1) 0 0;
 }
 
 .helperText {
-  margin: 0 0 var(--space-2);
+  margin: 0;
   color: var(--color-text-secondary);
+  max-width: 74ch;
 }
 
 .telemetrySetting {
@@ -67,10 +71,11 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--space-4);
-  padding: var(--space-3) 0;
-  margin: var(--space-4) 0;
-  border-top: 1px solid var(--color-border-subtle);
-  border-bottom: 1px solid var(--color-border-subtle);
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-secondary);
 }
 
 .telemetrySettingText {
@@ -114,7 +119,7 @@
 .field {
   display: grid;
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin: 0;
 }
 
 .field label {
@@ -141,7 +146,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin: 0;
 }
 
 .sampleRow button,
@@ -174,6 +179,7 @@
   flex-wrap: wrap;
   gap: var(--space-3);
   align-items: center;
+  margin-top: var(--space-1);
 }
 
 .inputSummary {
@@ -186,7 +192,7 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 
 .resultHeaderText {
@@ -226,13 +232,13 @@
   gap: var(--space-3);
   font-size: var(--font-size-meta);
   color: var(--color-text-secondary);
-  margin-bottom: var(--space-4);
+  margin: 0;
 }
 
 .notice {
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 
 .notice p {
@@ -260,12 +266,12 @@
 }
 
 .noticeCompact {
-  margin-top: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .identifierNote {
-  margin: 0 0 var(--space-3);
+  margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-meta);
 }
@@ -273,13 +279,35 @@
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .card {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  background: var(--color-surface-primary);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.cardIdentity {
+  border-color: var(--color-state-info-border);
+  background: #f8fcfd;
+}
+
+.cardCautions {
+  border-color: var(--color-state-warning-border);
+  background: #fffdf8;
+}
+
+.cardNextActions {
+  border-color: var(--color-border-default);
+  background: #f8fbfd;
+}
+
+.resultPanelError .card {
+  border-color: var(--color-border-subtle);
   background: var(--color-surface-secondary);
 }
 
@@ -288,11 +316,11 @@
 }
 
 .card h3 {
-  margin: var(--space-1) 0 var(--space-3);
+  margin: 0;
 }
 
 .cardLead {
-  margin: 0 0 var(--space-3);
+  margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-body);
 }
@@ -302,7 +330,7 @@
   background: var(--color-state-info-bg);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 
 .primaryMeaningLabel {
@@ -356,7 +384,7 @@
   background: var(--color-state-warning-bg);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 
 .warningPrimaryLabel {
@@ -414,7 +442,7 @@
 .nextStepCode {
   font-family: var(--font-family-mono);
   font-size: var(--font-size-mono);
-  margin: 0 0 var(--space-2);
+  margin: 0;
 }
 
 .nextStepCode code {
@@ -428,7 +456,9 @@
 }
 
 .technicalDetails {
-  margin-top: var(--space-3);
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .technicalDetails summary {
@@ -446,7 +476,7 @@
   background: var(--color-state-info-bg);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 
 .nextActionLabel {
@@ -464,7 +494,9 @@
 }
 
 .nextLinksSection {
-  margin-bottom: var(--space-3);
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
 }
 
 .nextLinksSection h4 {
@@ -507,7 +539,7 @@
 }
 
 .evidenceBlock {
-  margin-top: var(--space-4);
+  margin-top: 0;
   padding: var(--space-4);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);

@@ -168,7 +168,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
   const [primaryNextLink, ...supportingNextLinks] = result.next_links
 
   return (
-    <section className="resultPanel">
+    <section className="resultPanel resultPanelSuccess">
       <header className="resultHeader">
         <div className="resultHeaderText">
           <p className="typeEnglishLabel resultHeaderEnglish">Result</p>
@@ -196,7 +196,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
       <p className="identifierNote">{renderEntryResolutionNote(result.entry_resolution_status)}</p>
 
       <div className="cardGrid">
-        <article className="card">
+        <article className="card cardIdentity">
           <p className="typeEnglishLabel cardEnglishLabel">Identity</p>
           <h3 className="typeSectionHeading">1. これは何の構造か</h3>
           <p className="cardLead">構造タイプと由来を先に確認します。断定できない場合は unknown のまま表示します。</p>
@@ -226,7 +226,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
           </details>
         </article>
 
-        <article className="card">
+        <article className="card cardCautions">
           <p className="typeEnglishLabel cardEnglishLabel">Cautions</p>
           <h3 className="typeSectionHeading">2. まず気をつけること</h3>
           <p className="cardLead">最初に見てほしい注意を先に確認し、補足の契約値は技術情報で確認してください。</p>
@@ -267,7 +267,7 @@ function SuccessView({ envelope }: { envelope: SuccessEnvelope }): JSX.Element {
           </details>
         </article>
 
-        <article className="card">
+        <article className="card cardNextActions">
           <p className="typeEnglishLabel cardEnglishLabel">Next Actions</p>
           <h3 className="typeSectionHeading">3. 次にどこを見るか</h3>
           <p className="cardLead">迷ったら、まず下の最初の一手を実行し、必要に応じて補助導線を使ってください。</p>
@@ -356,7 +356,7 @@ function ErrorView({ envelope }: { envelope: ErrorEnvelope }): JSX.Element {
   const [primaryNextLink, ...supportingNextLinks] = error.next_links
 
   return (
-    <section className="resultPanel">
+    <section className="resultPanel resultPanelError">
       <header className="resultHeader">
         <div className="resultHeaderText">
           <p className="typeEnglishLabel resultHeaderEnglish">Process Status</p>
