@@ -62,7 +62,9 @@ export type AnonymousTelemetryDispatchOptions = {
   transport?: AnonymousTelemetryTransport
 }
 
-function resolveLocalStorage(): Pick<Storage, 'getItem'> | null {
+type AnonymousTelemetryStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+function resolveLocalStorage(): AnonymousTelemetryStorage | null {
   if (typeof window === 'undefined') {
     return null
   }
@@ -129,7 +131,36 @@ export function isAnonymousTelemetryOptedIn(
   if (storage === null) {
     return false
   }
-  return storage.getItem(TELEMETRY_OPT_IN_STORAGE_KEY) === 'true'
+  try {
+    return storage.getItem(TELEMETRY_OPT_IN_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function setAnonymousTelemetryOptIn(
+  optIn: boolean,
+  storage: Pick<Storage, 'setItem' | 'removeItem'> | null = resolveLocalStorage(),
+): boolean {
+  if (storage === null) {
+    return false
+  }
+
+  try {
+    storage.setItem(TELEMETRY_OPT_IN_STORAGE_KEY, optIn ? 'true' : 'false')
+    return true
+  } catch {
+    if (optIn) {
+      return false
+    }
+
+    try {
+      storage.removeItem(TELEMETRY_OPT_IN_STORAGE_KEY)
+      return true
+    } catch {
+      return false
+    }
+  }
 }
 
 export async function emitAnonymousTelemetryEvent(

@@ -15,6 +15,7 @@ vi.mock('./telemetry/anonymousTelemetry', async () => {
 })
 
 import App from './App'
+import { TELEMETRY_OPT_IN_STORAGE_KEY, isAnonymousTelemetryOptedIn } from './telemetry/anonymousTelemetry'
 
 function emittedEventCodes(): string[] {
   return emitAnonymousTelemetryEventMock.mock.calls.map((call) => String(call[0]))
@@ -24,6 +25,72 @@ describe('App anonymous telemetry integration', () => {
   beforeEach(() => {
     emitAnonymousTelemetryEventMock.mockReset()
     emitAnonymousTelemetryEventMock.mockResolvedValue(undefined)
+    window.localStorage.clear()
+  })
+
+  it('shows telemetry opt-in as OFF when no explicit storage value exists', () => {
+    render(<App />)
+
+    const optInSwitch = screen.getByRole('switch', { name: '匿名の利用計測' })
+    expect(optInSwitch).not.toBeChecked()
+    expect(screen.getByText('OFF')).toBeInTheDocument()
+  })
+
+  it('stores telemetry opt-in changes with the existing storage key', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const optInSwitch = screen.getByRole('switch', { name: '匿名の利用計測' })
+    await user.click(optInSwitch)
+
+    expect(window.localStorage.getItem(TELEMETRY_OPT_IN_STORAGE_KEY)).toBe('true')
+    expect(optInSwitch).toBeChecked()
+    expect(screen.getByText('ON')).toBeInTheDocument()
+
+    await user.click(optInSwitch)
+
+    expect(window.localStorage.getItem(TELEMETRY_OPT_IN_STORAGE_KEY)).toBe('false')
+    expect(optInSwitch).not.toBeChecked()
+    expect(screen.getByText('OFF')).toBeInTheDocument()
+    expect(emitAnonymousTelemetryEventMock).not.toHaveBeenCalled()
+  })
+
+  it('reflects stored telemetry opt-in state on initial render', () => {
+    window.localStorage.setItem(TELEMETRY_OPT_IN_STORAGE_KEY, 'true')
+
+    render(<App />)
+
+    const optInSwitch = screen.getByRole('switch', { name: '匿名の利用計測' })
+    expect(optInSwitch).toBeChecked()
+    expect(screen.getByText('ON')).toBeInTheDocument()
+  })
+
+  it('keeps UI and telemetry opt-in state consistent when opt-out write falls back', async () => {
+    window.localStorage.setItem(TELEMETRY_OPT_IN_STORAGE_KEY, 'true')
+    const originalSetItem = Storage.prototype.setItem
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key: string, value: string) {
+      if (key === TELEMETRY_OPT_IN_STORAGE_KEY && value === 'false') {
+        throw new Error('write failed')
+      }
+      return originalSetItem.call(this, key, value)
+    })
+
+    try {
+      const user = userEvent.setup()
+      render(<App />)
+
+      const optInSwitch = screen.getByRole('switch', { name: '匿名の利用計測' })
+      expect(optInSwitch).toBeChecked()
+
+      await user.click(optInSwitch)
+
+      expect(window.localStorage.getItem(TELEMETRY_OPT_IN_STORAGE_KEY)).toBeNull()
+      expect(isAnonymousTelemetryOptedIn(window.localStorage)).toBe(false)
+      expect(optInSwitch).not.toBeChecked()
+      expect(screen.getByText('OFF')).toBeInTheDocument()
+    } finally {
+      setItemSpy.mockRestore()
+    }
   })
 
   it('separates unknown render telemetry from error telemetry', async () => {

@@ -4,6 +4,7 @@ import {
   emitAnonymousTelemetryEvent,
   isAnonymousTelemetryOptedIn,
   mapLinkTelemetryEventCode,
+  setAnonymousTelemetryOptIn,
   type AnonymousTelemetryPayload,
 } from './anonymousTelemetry'
 
@@ -14,6 +15,18 @@ describe('anonymousTelemetry', () => {
     await emitAnonymousTelemetryEvent('result_rendered', {
       endpoint: 'https://example.test/telemetry',
       optIn: false,
+      transport,
+    })
+
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('does not send telemetry when endpoint is missing even if opt-in is true', async () => {
+    const transport = vi.fn(async () => undefined)
+
+    await emitAnonymousTelemetryEvent('result_rendered', {
+      endpoint: '',
+      optIn: true,
       transport,
     })
 
@@ -53,6 +66,62 @@ describe('anonymousTelemetry', () => {
 
     expect(isAnonymousTelemetryOptedIn(storageTrue)).toBe(true)
     expect(isAnonymousTelemetryOptedIn(storageFalse)).toBe(false)
+  })
+
+  it('falls back to disabled when opt-in storage cannot be read', () => {
+    const storage = {
+      getItem: vi.fn(() => {
+        throw new Error('storage blocked')
+      }),
+    }
+
+    expect(isAnonymousTelemetryOptedIn(storage)).toBe(false)
+  })
+
+  it('stores explicit opt-in flag with the existing storage key', () => {
+    const storage = {
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    }
+
+    expect(setAnonymousTelemetryOptIn(true, storage)).toBe(true)
+    expect(storage.setItem).toHaveBeenLastCalledWith(TELEMETRY_OPT_IN_STORAGE_KEY, 'true')
+
+    expect(setAnonymousTelemetryOptIn(false, storage)).toBe(true)
+    expect(storage.setItem).toHaveBeenLastCalledWith(TELEMETRY_OPT_IN_STORAGE_KEY, 'false')
+  })
+
+  it('reports opt-in storage write failure without throwing', () => {
+    const storage = {
+      setItem: vi.fn(() => {
+        throw new Error('storage blocked')
+      }),
+      removeItem: vi.fn(),
+    }
+
+    expect(setAnonymousTelemetryOptIn(true, storage)).toBe(false)
+  })
+
+  it('falls back to removing stored true flag when opt-out write fails', () => {
+    let storedValue: string | null = 'true'
+    const storage = {
+      setItem: vi.fn((key: string, value: string) => {
+        if (key === TELEMETRY_OPT_IN_STORAGE_KEY && value === 'false') {
+          throw new Error('quota exceeded')
+        }
+        storedValue = value
+      }),
+      removeItem: vi.fn((key: string) => {
+        if (key === TELEMETRY_OPT_IN_STORAGE_KEY) {
+          storedValue = null
+        }
+      }),
+      getItem: vi.fn((key: string) => (key === TELEMETRY_OPT_IN_STORAGE_KEY ? storedValue : null)),
+    }
+
+    expect(setAnonymousTelemetryOptIn(false, storage)).toBe(true)
+    expect(storage.removeItem).toHaveBeenCalledWith(TELEMETRY_OPT_IN_STORAGE_KEY)
+    expect(isAnonymousTelemetryOptedIn(storage)).toBe(false)
   })
 
   it('maps destination link to the expected telemetry event code', () => {

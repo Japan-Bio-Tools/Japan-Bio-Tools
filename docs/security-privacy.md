@@ -15,7 +15,7 @@
 
 ## 匿名計測方針
 - 追加の Analytics/Telemetry SDK は導入していない。
-- 匿名計測は `VITE_BIOFILE_GUIDE_ANONYMOUS_TELEMETRY_ENDPOINT` が設定され、かつ opt-in が `true` のときだけ送信する。
+- 匿名計測は UI から opt-in / opt-out を切り替えられ、`VITE_BIOFILE_GUIDE_ANONYMOUS_TELEMETRY_ENDPOINT` が設定され、かつ opt-in が `true` のときだけ送信する。
 - 送信 payload は `event_code` と `event_category` のみとし、raw structure data や識別子を含めない。
 
 ## ホスティング

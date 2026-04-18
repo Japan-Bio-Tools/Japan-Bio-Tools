@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { runBioFileGuide } from './application/runBioFileGuide'
 import { resolveMetadataAdapterMode } from './application/metadataAdapterFactory'
@@ -13,7 +13,9 @@ import {
 import type { BioFileEnvelope, ErrorEnvelope, SuccessEnvelope } from './types/contracts'
 import {
   emitAnonymousTelemetryEvent,
+  isAnonymousTelemetryOptedIn,
   mapLinkTelemetryEventCode,
+  setAnonymousTelemetryOptIn,
   type AnonymousTelemetryEventCode,
 } from './telemetry/anonymousTelemetry'
 
@@ -467,6 +469,7 @@ export default function App(): JSX.Element {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [result, setResult] = useState<BioFileEnvelope | null>(null)
   const [isRunning, setIsRunning] = useState(false)
+  const [isTelemetryOptedIn, setIsTelemetryOptedIn] = useState(() => isAnonymousTelemetryOptedIn())
 
   const inputSummary = useMemo(() => {
     if (selectedFile !== null) {
@@ -492,6 +495,12 @@ export default function App(): JSX.Element {
       emitTelemetrySafely('error_invalid_identifier')
     }
   }, [result])
+
+  const handleTelemetryOptInChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const nextOptIn = event.currentTarget.checked
+    setAnonymousTelemetryOptIn(nextOptIn)
+    setIsTelemetryOptedIn(isAnonymousTelemetryOptedIn())
+  }
 
   const run = async (): Promise<void> => {
     setIsRunning(true)
@@ -531,6 +540,33 @@ export default function App(): JSX.Element {
         <h2 className="typePageHeading">入力</h2>
         <p className="helperText">4文字PDB ID / 拡張PDB ID / ローカルPDB / ローカルmmCIF に対応します。</p>
         <p className="helperText">ローカルファイル本文はブラウザ内で処理し、外部送信しません。</p>
+
+        <div className="telemetrySetting">
+          <div className="telemetrySettingText">
+            <label className="telemetrySettingTitle" htmlFor="telemetryOptIn">
+              匿名の利用計測
+            </label>
+            <p id="telemetrySettingDescription" className="telemetrySettingDescription">
+              改善のため、匿名の利用イベントを送信できます。構造データ・入力本文・識別子・ファイル名は送信しません。
+            </p>
+            <p id="telemetrySettingNote" className="telemetrySettingNote">
+              送信先未設定時は、有効にしても送信されません。
+            </p>
+          </div>
+          <div className="telemetryToggleControl">
+            <input
+              id="telemetryOptIn"
+              type="checkbox"
+              role="switch"
+              checked={isTelemetryOptedIn}
+              onChange={handleTelemetryOptInChange}
+              aria-describedby="telemetrySettingDescription telemetrySettingNote"
+            />
+            <span className="telemetryToggleState" aria-hidden="true">
+              {isTelemetryOptedIn ? 'ON' : 'OFF'}
+            </span>
+          </div>
+        </div>
 
         <div className="field">
           <label htmlFor="idInput">ID入力</label>
